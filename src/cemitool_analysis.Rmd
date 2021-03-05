@@ -1,0 +1,168 @@
+---
+title: "CemiTool"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r Load libraries}
+library(here)
+library(CEMiTool)
+library(tidyverse)
+library(clusterProfiler)
+```
+
+
+```{r Load files}
+# Phenodata
+pheno <- read.delim(here("data", "phenodata.tsv"))  
+
+# TPM nomr count Not multimapping reads
+tpm_notmulti <- read_tsv(here("data", "gene_expression", 
+                              "counts_NOTmultimapping_TPM.tsv"))
+
+# TPM counts multimapping reads
+tpm_multi <- read_tsv(here("data", "gene_expression", 
+                           "counts_multimapping_TPM.tsv"))
+
+gmt.reactn <- read_tsv(here("data", "reactome_data", 
+                            "ReactomePathwaysLevel3_ensembl_2021-02.tsv"))
+
+#gmt.react <- read.gmt(gmtfile = here("data", "ReactomePathwaysLevel3.gmt"))
+#gmt.btm <- read.gmt(gmtfile = here("data","BTM_for_GSEA_20131008.gmt"))
+
+#int_fname <- system.file("extdata", "interactions.tsv", package = "CEMiTool")
+#int_df <- read.delim(int_fname)
+
+int_df <- read_tsv(here("data", "interaction_DB", 
+                        "9606.gene.physical.links.STRINGv11.tsv")) %>% 
+  as.data.frame()
+```
+
+```{r Run CEMiTool NOT Multimapping}
+smpl.annot <- pheno %>% 
+  select(Sample, Class, Day) %>% 
+  unite("Class", Class:Day) %>% 
+  rename(SampleName = Sample) %>% 
+  mutate(SampleName = as.character(SampleName))
+
+counts <- as.data.frame(tpm_notmulti[!duplicated(tpm_notmulti$GeneSymbol),])
+rownames(counts) <- counts$GeneSymbol
+
+cem.reactome <- cemitool(expr = counts[,-c(1:2)], annot = smpl.annot, 
+                         gmt = gmt.react, interactions = int_df, apply_vst = T, 
+                         gsea_max_size = 2e3, verbose = TRUE)
+
+cem.btm <- cemitool(expr = counts[,-c(1:2)], annot = smpl.annot, 
+                    gmt = gmt.btm, interactions = int_df, apply_vst = T, 
+                    gsea_max_size = 2e3, verbose = TRUE)
+
+# Reactome
+generate_report(cem.reactome, title = "notMultimapping_Reactome",
+                directory = here("results", "CEMiTool", "Report",
+                                 "notMultimapping_Reactome"))
+diagnostic_report(cem.reactome, title = "notMultimapping_Reactome",
+                  directory = here("results", "CEMiTool", "Diagnostic",
+                                   "notMultimapping_Reactome"))
+save_plots(cem.reactome, "all", directory = here("results", "CEMiTool", "Plots",
+                                                 "notMultimapping_Reactome"))
+
+# BTM
+generate_report(cem.btm, title = "notMultimapping_BTM",
+                directory = here("results", "CEMiTool", "Report",
+                                 "notMultimapping_BTM"))
+diagnostic_report(cem.btm, title = "notMultimapping_BTM",
+                  directory = here("results", "CEMiTool", "Diagnostic",
+                                   "notMultimapping_BTM"))
+save_plots(cem.btm, "all", directory = here("results", "CEMiTool", "Plots",
+                                            "notMultimapping_BTM"))
+```
+
+```{r CEMiTool Multimapping}
+smpl.annot <- pheno %>% 
+  select(Sample, Class, Day) %>% 
+  unite("Class", Class:Day) %>% 
+  rename(SampleName = Sample) %>% 
+  mutate(SampleName = as.character(SampleName))
+
+counts <- as.data.frame(tpm_multi[!duplicated(tpm_multi$GeneSymbol),])
+rownames(counts) <- counts$GeneSymbol
+
+cem.reactome <- cemitool(expr = counts[,-c(1:2)], annot = smpl.annot, 
+                         gmt = gmt.react, interactions = int_df, apply_vst = T, 
+                         force_beta = T, gsea_max_size = 2e3, verbose = TRUE)
+
+cem.btm <- cemitool(expr = counts[,-c(1:2)], annot = smpl.annot, 
+                    gmt = gmt.btm, interactions = int_df, apply_vst = T, 
+                    force_beta = T, gsea_max_size = 2e3, verbose = TRUE)
+
+# Reactome
+generate_report(cem.reactome, title = "Multimapping_Reactome",
+                directory = here("results", "CEMiTool", "Report",
+                                 "Multimapping_Reactome"))
+diagnostic_report(cem.reactome, title = "Multimapping_Reactome",
+                  directory = here("results", "CEMiTool", "Diagnostic",
+                                   "Multimapping_Reactome"))
+save_plots(cem.reactome, "all", directory = here("results", "CEMiTool", "Plots",
+                                                 "Multimapping_Reactome"))
+
+# BTM
+generate_report(cem.btm, title = "Multimapping_BTM",
+                directory = here("results", "CEMiTool", "Report",
+                                 "Multimapping_BTM"))
+diagnostic_report(cem.btm, title = "Multimapping_BTM",
+                  directory = here("results", "CEMiTool", "Diagnostic",
+                                   "Multimapping_BTM"))
+save_plots(cem.btm, "all", directory = here("results", "CEMiTool", "Plots",
+                                            "Multimapping_BTM"))
+```
+
+```{r Run TEST CEMiTool NOT Multimapping - reactome level 3 new}
+smpl.annot <- pheno %>% 
+  select(Sample, Class, Day) %>% 
+  unite("Class", Class:Day) %>% 
+  rename(SampleName = Sample) %>% 
+  mutate(SampleName = as.character(SampleName))
+
+counts <- as.data.frame(tpm_notmulti)
+rownames(counts) <- counts$Symbol
+
+cem.reactome <- cemitool(expr = counts[,-c(1:2)], annot = smpl.annot, 
+                         gmt = gmt.reactn, apply_vst = T, interactions = int_df,
+                         gsea_max_size = 2e3, verbose = TRUE)
+
+# Reactome New (2021-02)
+generate_report(cem.reactome, title = "notMultimapping_Reactome_new",
+                directory = here("results", "CEMiTool", "Report",
+                                 "notMultimapping_Reactome_new"))
+diagnostic_report(cem.reactome, title = "notMultimapping_Reactome_new",
+                  directory = here("results", "CEMiTool", "Diagnostic",
+                                   "notMultimapping_Reactome_new"))
+save_plots(cem.reactome, "all", directory = here("results", "CEMiTool", "Plots",
+                                                 "notMultimapping_Reactome_new"))
+```
+
+```{r Run TEST CEMiTool Multimapping - reactome level 3 new}
+smpl.annot <- pheno %>% 
+  select(Sample, Class, Day) %>% 
+  unite("Class", Class:Day) %>% 
+  rename(SampleName = Sample) %>% 
+  mutate(SampleName = as.character(SampleName))
+
+counts <- as.data.frame(tpm_multi)
+rownames(counts) <- counts$Symbol
+
+cem.reactome <- cemitool(expr = counts[,-c(1:2)], annot = smpl.annot, 
+                         gmt = gmt.reactn, apply_vst = T, set_beta = 20,
+                         gsea_max_size = 2e3, interactions = int_df,
+                         verbose = TRUE)
+
+# Reactome New (2021-02)
+generate_report(cem.reactome, title = "Multimapping_Reactome_new",
+                directory = here("results", "CEMiTool", "Report",
+                                 "Multimapping_Reactome_new"))
+diagnostic_report(cem.reactome, title = "Multimapping_Reactome_new",
+                  directory = here("results", "CEMiTool", "Diagnostic",
+                                   "Multimapping_Reactome_new"))
+save_plots(cem.reactome, "all", directory = here("results", "CEMiTool", "Plots",
+                                                 "Multimapping_Reactome_new"))
+```

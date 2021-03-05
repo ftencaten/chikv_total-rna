@@ -1,0 +1,54 @@
+---
+title: "Reactome level"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r Load libraries}
+library(here)
+library(tidyverse)
+library(igraph)
+```
+
+```{r Load files}
+# All levels of the pathway hierarchy (all organisms)
+reactome_all <- read_tsv(here("data", "reactome_data", 
+                              "Ensembl2Reactome_All_Levels.txt"), col_names = F)
+
+# 27 top levels nodes
+tln <- read_tsv(here("data", "reactome_data", "topLevel_nodes_reactome.txt"))
+
+# Pathways hierarchy relationship
+hch <- read_tsv(here("data", "reactome_data", "ReactomePathwaysRelation.txt"),
+                col_names = F)
+```
+
+```{r Get third level nodes}
+hrel <- hch %>% 
+  filter(grepl("HSA", X1))%>% 
+  dplyr::rename(source = "X1", target = "X2")
+
+# Calculate hierarchy level with graph.data.frame function from igraph pkg
+graph_hrel <- graph.data.frame(hrel)
+
+# Function to extract third level nodes based on 27 top nodes from "tln"
+getlevel <- function(x) {
+  level <- data.frame(node = names(shortest.paths(graph_hrel)[,x]), 
+                     rank = shortest.paths(graph_hrel)[,x]+1)
+  return(rownames(level[level$rank == 3, ]))
+}
+
+third_level <- unique(unlist(apply(as.data.frame(tln), 1, getlevel)))
+```
+
+```{r Filter third level nodes}
+gmt <- reactome_all %>%
+  filter(X2 %in% third_level) %>% 
+  filter(grepl("ENSG", X1)) %>% 
+  dplyr::select(term = X4, gene = X1)
+
+write_tsv(gmt, here("data","reactome_data",
+                    "ReactomePathwaysLevel3_ensembl_2021-02.tsv"))
+
+```
+

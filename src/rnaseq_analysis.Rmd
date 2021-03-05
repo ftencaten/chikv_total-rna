@@ -1,0 +1,501 @@
+---
+title: "RNA-seq analysis - CHIKV infection"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r Load libraries}
+library(here)
+library(tidyverse)
+library(edgeR)
+library(EDASeq)
+library(pheatmap)
+library(ggfortify)
+library(RColorBrewer)
+```
+
+```{r Load files}
+# Human genome annotation
+hannot <- read_tsv(here("data", 
+                        "Homo_sapiens.GRCh38.100_gene_annotation_table.txt"))
+
+# Gene length
+gl <- read_tsv(here("data", "GC_lengths.tsv"), col_names = F, skip = 1) %>% 
+  dplyr::rename(gene_id = X1, gene_length = X2) %>% 
+  dplyr::select(-X3)
+  
+# Phenodata
+pheno <- read_tsv(here("data", "phenodata.tsv")) %>% 
+  mutate(Class = factor(Class), Day  = factor(Day)) 
+  
+# Read not multimapping file
+rawcount_notmulti <- read_tsv(here("data", "geneCounts",
+                          "rawCounts_featureCounts_NOTmultimapping.tsv")) %>%
+  rename_with(~ sub(".Aligned.sortedByCoord.out.bam", "", .x), 
+              ends_with("bam")) %>% 
+  rename_with(~ sub("19017", "", .x), everything()) %>% 
+  rename_with(~ sub("Aligned.out.bam", "", .x), everything()) %>% 
+  dplyr::select("Symbol", sort(colnames(.)))
+
+# Read multimapping file
+rawcount_multi <- read_tsv(here("data", "geneCounts",
+                          "rawCounts_featureCounts_multimapping.tsv")) %>%
+  rename_with(~ sub(".Aligned.sortedByCoord.out.bam", "", .x), 
+              ends_with("bam")) %>% 
+  rename_with(~ sub("19017", "", .x), everything()) %>% 
+  rename_with(~ sub("Aligned.out.bam", "", .x), everything()) %>% 
+  dplyr::select("Symbol", sort(colnames(.)))
+  
+# Reactome gene set
+gene_set <- read_tsv(here("data", "reactome_data", 
+                          "ReactomePathwaysLevel3_ensembl_2021-02.tsv"))
+
+# Read file with 75 interferon and interleukine genes
+ilifn <- read_tsv(here("data", "IFN_IL_list.txt"))
+```
+
+
+```{r Alignment Stat}
+# feature count stat not multimapping
+stat_notmulti <- read_tsv(here("data", "geneCounts", 
+                               "featureCounts_stat_NOTmultimapping.tsv")) %>%
+  rename_with(~ sub(".Aligned.sortedByCoord.out.bam", "", .x), 
+              ends_with("bam")) %>% 
+  rename_with(~ sub("19017", "", .x), everything()) %>% 
+  rename_with(~ sub("Aligned.out.bam", "", .x), everything()) %>% 
+  pivot_longer(-Status, names_to = "lib", values_to = "reads") %>% 
+  mutate(protocol = "NotMulti")
+
+stat_multi <- read_tsv(here("data", "geneCounts", 
+                               "featureCounts_stat_multimapping.tsv")) %>%
+  rename_with(~ sub(".Aligned.sortedByCoord.out.bam", "", .x), 
+              ends_with("bam")) %>% 
+  rename_with(~ sub("19017", "", .x), everything()) %>% 
+  rename_with(~ sub("Aligned.out.bam", "", .x), everything()) %>% 
+  pivot_longer(-Status, names_to = "lib", values_to = "reads") %>% 
+  mutate(protocol = "Multi")
+
+x <- stat_notmulti %>% 
+  bind_rows(stat_multi) %>% 
+  filter(Status == "Assigned") 
+%>% 
+  ggplot(aes(x = lib, y = reads, fill = protocol)) +
+  geom_bar(stat = "identity", position=position_dodge()) +
+  scale_fill_manual(values = brewer.pal(3,"RdYlBu")[c(1,3)]) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, size=4),
+        panel.grid.major.x = element_blank())+
+  scale_y_continuous(labels = scales::number)
+
+ggsave(here("results","figures", "featureCount_stats.png"), plotstat, 
+       device = "png", width = 12, height = 7, units = "cm", 
+       dpi = "print", scale = 2)
+
+```
+
+
+```{r Normalization TPM}
+# Not multimapping
+countnotmulti <- rawcount_notmulti %>%
+  full_join(hannot[,1:2], by = c('Symbol' = 'gene_id')) %>% 
+  inner_join(gl, by = c('Symbol' = 'gene_id')) %>% 
+  relocate(Symbol, GeneSymbol, gene_length)
+
+TPMnotmulti <- scater::calculateTPM(countnotmulti[,-c(1:3)], 
+                                    countnotmulti$gene_length)
+
+outTPMnotmulti <- TPMnotmulti %>% 
+  as_tibble() %>% 
+  mutate(Symbol = countnotmulti$Symbol, 
+         GeneSymbol = countnotmulti$GeneSymbol) %>% 
+  relocate(Symbol, GeneSymbol)
+
+#write_tsv(outTPMnotmulti,
+#          here("data", "gene_expression", "counts_NOTmultimapping_TPM.tsv"))
+
+# Multimapping
+countmulti <- rawcount_multi %>%
+  full_join(hannot[,1:2], by = c('Symbol' = 'gene_id')) %>%
+  inner_join(gl, by = c('Symbol' = 'gene_id')) %>% 
+  relocate(Symbol, GeneSymbol, gene_length)
+
+TPMmulti <- scater::calculateTPM(countmulti[,-c(1:3)], countmulti$gene_length)
+
+outTPMmulti <- TPMmulti %>% 
+  as_tibble() %>% 
+  mutate(Symbol = countmulti$Symbol, 
+         GeneSymbol = countmulti$GeneSymbol) %>% 
+  relocate(Symbol, GeneSymbol)
+
+#write_tsv(outTPMmulti,
+#          here("data", "gene_expression", "counts_multimapping_TPM.tsv"))
+
+```
+
+
+```{r Heatmap}
+# Not multimapping
+normcount_notmulti <- edgeR::cpm(rawcount_notmulti[,-1])
+rownames(normcount_notmulti) <- rawcount_notmulti$Symbol
+
+V_notmulti <- apply(normcount_notmulti, 1, var)
+
+selectedGenes_notmulti <- names(V_notmulti[order(V_notmulti, 
+                                                 decreasing = T)][1:500])
+
+annot <- pheno[,2:4]
+rownames(annot) <- pheno$Sample
+
+heatmap_notmulti <- pheatmap(normcount_notmulti[selectedGenes_notmulti,], 
+                             scale = 'row', show_rownames = F, 
+                             annotation_col = as.data.frame(annot),
+                             show_colnames = F)
+
+ggsave(here("results","figures","Heatmap_notmulti.png"), heatmap_notmulti, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2)
+
+# Multimapping
+normcount_multi <- edgeR::cpm(rawcount_multi[,-1])
+rownames(normcount_multi) <- rawcount_multi$Symbol
+
+V_multi <- apply(normcount_multi, 1, var)
+
+selectedGenes_multi <- names(V_multi[order(V_multi, decreasing = T)][1:500])
+
+heatmap_multi <- pheatmap(normcount_multi[selectedGenes_multi,], 
+                          scale = 'row', show_rownames = F, 
+                          annotation_col = as.data.frame(annot),
+                          show_colnames = F)
+
+ggsave(here("results","figures","Heatmap_multi.png"), heatmap_multi, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2)
+```
+
+```{r RLE}
+colors <- brewer.pal(3, "Set2")
+
+# Not multimapping
+plotRLE(as.matrix(rawcount_notmulti[,-1]), outline = FALSE, 
+        col = colors[pheno$Class], ylim = c(-4, 4), 
+        main = "Raw counts - Not multimapping", 
+        ylab= "Relative Log Expression")
+
+plotRLE(cpm(rawcount_notmulti[,-1]), outline=FALSE, col = colors[pheno$Class],
+        ylim = c(-4, 4), main = "CPM - Not multimapping", 
+        ylab= "Relative Log Expression")
+
+# Multimapping
+plotRLE(as.matrix(rawcount_multi[,-1]), outline = FALSE, 
+        col = colors[pheno$Class], ylim = c(-4, 4), 
+        main = "Raw counts - Multimapping", ylab= "Relative Log Expression")
+
+plotRLE(cpm(rawcount_multi[,-1]), outline=FALSE, col = colors[pheno$Class],
+        ylim = c(-4, 4), main = "CPM - Multimapping", 
+        ylab= "Relative Log Expression")
+```
+
+```{r PCA}
+# Not multimapping
+M_notmulti <- t(normcount_notmulti[selectedGenes_notmulti,])
+
+M_notmulti <- log2(M_notmulti + 1)
+
+pcaResults_notmulti <- prcomp(M_notmulti)
+
+pca_notmulti <- autoplot(pcaResults_notmulti, data = as.data.frame(annot), 
+         colour = 'Day', shape = "Class") +
+  scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
+  theme_bw()
+
+ggsave(here("results","figures","PCA_notmulti.png"), pca_notmulti, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 1)
+
+# Multimapping
+M_multi <- t(normcount_multi[selectedGenes_multi,])
+
+M_multi <- log2(M_multi + 1)
+
+pcaResults_multi <- prcomp(M_multi)
+
+pca_multi <- autoplot(pcaResults_multi, data = as.data.frame(annot), 
+         colour = 'Day', shape = "Class") +
+  scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
+  theme_bw()
+
+ggsave(here("results","figures","PCA_multi.png"), pca_multi, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 1)
+```
+
+```{r DE analysis Not multimapping}
+group <- factor(paste(pheno$Class, pheno$Day, sep = "_"))
+
+#Not multimapping
+y <- DGEList(counts = rawcount_notmulti[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 5)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+#plotMDS(y, col = brewer.pal(4,"Set2")[group], labels = group)
+
+# Estimate Dispersion
+y <- estimateDisp(y, design)
+#plotBCV(y)
+
+#DE
+fit <- glmQLFit(y, design)
+
+my.contrast <- makeContrasts(
+  chronVSctrl.D0 = groupchronic_D0 - groupcontrol_D0,
+  chronVSctrl.D21 = groupchronic_D21 - groupcontrol_D21,
+  chronD21VSchronD0 = groupchronic_D21 - groupchronic_D0,
+  ctrlD21VSctrlD0 = groupcontrol_D21 - groupcontrol_D0,
+  chronVSctrl = (groupchronic_D21 + groupchronic_D0) - (groupcontrol_D21 + groupcontrol_D0),
+  D21VSD0 = (groupchronic_D21 + groupcontrol_D21) - (groupchronic_D0 + groupcontrol_D0),
+  levels = design)
+
+chronVSctrl.D0 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSctrl.D0"])
+chronVSctrl.D21 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSctrl.D21"])
+chronD21VSchronD0 <- glmQLFTest(fit, contrast = my.contrast[, "chronD21VSchronD0"])
+ctrlD21VSctrlD0 <- glmQLFTest(fit, contrast = my.contrast[, "ctrlD21VSctrlD0"])
+chronVSctrl <- glmQLFTest(fit, contrast = my.contrast[, "chronVSctrl"])
+D21VSD0 <- glmQLFTest(fit, contrast = my.contrast[, "D21VSD0"])
+
+chronVSctrl.D0_t <- topTags(chronVSctrl.D0, n = NULL)$table
+chronVSctrl.D21_t <- topTags(chronVSctrl.D21, n = NULL)$table
+chronD21VSchronD0_t <- topTags(chronD21VSchronD0, n = NULL)$table
+ctrlD21VSctrlD0_t <- topTags(ctrlD21VSctrlD0, n = NULL)$table
+chronVSctrl_t <- topTags(chronVSctrl, n = NULL)$table
+D21VSD0_t <- topTags(D21VSD0, n = NULL)$table
+
+edger.output.notmulti <- chronVSctrl.D0_t %>%
+  full_join(chronVSctrl.D21_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronVSctrl.D0", "_chronVSctrl.D21")) %>% 
+  full_join(chronD21VSchronD0_t, by = c("gene_id","GeneSymbol","Class")) %>% 
+  full_join(ctrlD21VSctrlD0_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronD21VSchronD0", "_ctrlD21VSctrlD0")) %>%
+  full_join(chronVSctrl_t, by = c("gene_id","GeneSymbol","Class")) %>%
+  full_join(D21VSD0_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronVSctrl", "_D21VSD0"))
+
+#write_tsv(edger.output.notmulti,
+#          here("results", "DEG_edgeR", 
+#               "diff_express_all_comparisons_notmulti.tsv"))
+
+edger.output.notmulti %>% 
+  filter(logFC_chronVSctrl.D0 > 1 & FDR_chronVSctrl.D0 < 0.1) %>% nrow()
+edger.output.notmulti %>% 
+  filter(logFC_chronVSctrl.D0 < -1 & FDR_chronVSctrl.D0 < 0.1) %>% nrow()
+
+edger.output.notmulti %>% 
+  filter(logFC_chronVSctrl.D21 > 1 & FDR_chronVSctrl.D21 < 0.1) %>% nrow()
+edger.output.notmulti %>% 
+  filter(logFC_chronVSctrl.D21 < -1 & FDR_chronVSctrl.D21 < 0.1) %>% nrow()
+
+edger.output.notmulti %>% 
+  filter(logFC_chronD21VSchronD0 > 1 & FDR_chronD21VSchronD0 < 0.1) %>% nrow()
+edger.output.notmulti %>% 
+  filter(logFC_chronD21VSchronD0 < -1 & FDR_chronD21VSchronD0 < 0.1) %>% nrow()
+
+edger.output.notmulti %>% 
+  filter(logFC_ctrlD21VSctrlD0 > 1 & FDR_ctrlD21VSctrlD0 < 0.1) %>% nrow()
+edger.output.notmulti %>% 
+  filter(logFC_ctrlD21VSctrlD0 < -1 & FDR_ctrlD21VSctrlD0 < 0.1) %>% nrow()
+
+edger.output.notmulti %>% 
+  filter(logFC_chronVSctrl > 1 & FDR_chronVSctrl < 0.1) %>% nrow()
+edger.output.notmulti %>% 
+  filter(logFC_chronVSctrl < -1 & FDR_chronVSctrl < 0.1) %>% nrow()
+
+edger.output.notmulti %>% 
+  filter(logFC_D21VSD0 > 1 & FDR_D21VSD0 < 0.1) %>% nrow()
+edger.output.notmulti %>% 
+  filter(logFC_D21VSD0 < -1 & FDR_D21VSD0 < 0.1) %>% nrow()
+
+```
+
+```{r Gene set enrichment analysis - Not multimapping}
+term.list <- split(gene_set, as.factor(gene_set$term))
+path.list <- lapply(term.list, function(x) return(unname(as_vector(x[,2]))))
+
+idx <- ids2indices(path.list, id = y$genes$gene_id)
+
+chronVSctrl.D0.enrich <- camera(y, idx, design, inter.gene.cor = 0.01,
+                                contrast = my.contrast[, "chronVSctrl.D0"])
+
+chronVSctrl.D21.enrich <- camera(y, idx, design, inter.gene.cor=0.01,
+                                 contrast = my.contrast[, "chronVSctrl.D21"])
+
+chronD21VSchronD0.enrich <- camera(y, idx, design, inter.gene.cor=0.01,
+                                   contrast = my.contrast[, "chronD21VSchronD0"])
+
+ctrlD21VSctrlD0.enrich <- camera(y, idx, design, inter.gene.cor=0.01,
+                                  contrast = my.contrast[, "ctrlD21VSctrlD0"])
+
+chronVSctrl.enrich <- camera(y, idx, design, inter.gene.cor=0.01,
+                             contrast = my.contrast[, "chronVSctrl"])
+
+D21VSD0.enrich <- camera(y, idx, design, inter.gene.cor=0.01,
+                             contrast = my.contrast[, "D21VSD0"])
+
+
+barcodeplot(D21VSD0_t$logFC,
+            index=idx[["G2/M Checkpoints"]],
+            labels=c("D21","D0"),
+            main="G2/M Checkpoints",
+            alpha=1)
+```
+
+```{r DE analysis Multimapping}
+group <- factor(paste(pheno$Class, pheno$Day, sep = "_"))
+
+#Not multimapping
+y <- DGEList(counts = rawcount_multi[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 5)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+#plotMDS(y, col = brewer.pal(4,"Set2")[group], labels = group)
+
+# Estimate Dispersion
+y <- estimateDisp(y, design)
+#plotBCV(y)
+
+#DE
+fit <- glmQLFit(y, design)
+
+chronVSctrl.D0 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSctrl.D0"])
+chronVSctrl.D21 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSctrl.D21"])
+chronD21VSchronD0 <- glmQLFTest(fit, contrast = my.contrast[, "chronD21VSchronD0"])
+ctrlD21VSctrlD0 <- glmQLFTest(fit, contrast = my.contrast[, "ctrlD21VSctrlD0"])
+chronVSctrl <- glmQLFTest(fit, contrast = my.contrast[, "chronVSctrl"])
+D21VSD0 <- glmQLFTest(fit, contrast = my.contrast[, "D21VSD0"])
+
+chronVSctrl.D0_t <- topTags(chronVSctrl.D0, n = NULL)$table
+chronVSctrl.D21_t <- topTags(chronVSctrl.D21, n = NULL)$table
+chronD21VSchronD0_t <- topTags(chronD21VSchronD0, n = NULL)$table
+ctrlD21VSctrlD0_t <- topTags(ctrlD21VSctrlD0, n = NULL)$table
+chronVSctrl_t <- topTags(chronVSctrl, n = NULL)$table
+D21VSD0_t <- topTags(D21VSD0, n = NULL)$table
+
+edger.output.multi <- chronVSctrl.D0_t %>%
+  full_join(chronVSctrl.D21_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronVSctrl.D0", "_chronVSctrl.D21")) %>% 
+  full_join(chronD21VSchronD0_t, by = c("gene_id","GeneSymbol","Class")) %>% 
+  full_join(ctrlD21VSctrlD0_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronD21VSchronD0", "_ctrlD21VSctrlD0")) %>%
+  full_join(chronVSctrl_t, by = c("gene_id","GeneSymbol","Class")) %>%
+  full_join(D21VSD0_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronVSctrl", "_D21VSD0"))
+
+#write_tsv(edger.output.multi,
+#          here("results", "DEG_edgeR", 
+#               "diff_express_all_comparisons_multi.tsv"))
+
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl.D0 > 1 & FDR_chronVSctrl.D0 < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl.D0 < -1 & FDR_chronVSctrl.D0 < 0.1) %>% nrow()
+
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl.D21 > 1 & FDR_chronVSctrl.D21 < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl.D21 < -1 & FDR_chronVSctrl.D21 < 0.1) %>% nrow()
+
+edger.output.multi %>% 
+  filter(logFC_chronD21VSchronD0 > 1 & FDR_chronD21VSchronD0 < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_chronD21VSchronD0 < -1 & FDR_chronD21VSchronD0 < 0.1) %>% nrow()
+
+edger.output.multi %>% 
+  filter(logFC_ctrlD21VSctrlD0 > 1 & FDR_ctrlD21VSctrlD0 < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_ctrlD21VSctrlD0 < -1 & FDR_ctrlD21VSctrlD0 < 0.1) %>% nrow()
+
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl > 1 & FDR_chronVSctrl < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl < -1 & FDR_chronVSctrl < 0.1) %>% nrow()
+
+edger.output.multi %>% 
+  filter(logFC_D21VSD0 > 1 & FDR_D21VSD0 < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_D21VSD0 < -1 & FDR_D21VSD0 < 0.1) %>% nrow()
+```
+
+```{r Plot}
+x <- outTPMnotmulti %>% 
+  pivot_longer(-c('Symbol','GeneSymbol'), names_to = 'lib', 
+               values_to = 'tpm') %>%
+  mutate(lib = as.double(lib)) %>% 
+  full_join(pheno, by = c('lib' = 'Sample')) %>% 
+  unite("ClassDay", Class:Day)
+
+x %>% 
+  filter(GeneSymbol == "CAMK1D") %>% 
+  ggplot(aes(ClassDay, log2(tpm+1))) +
+  geom_boxplot()
+```
+
+```{r Interferon/Interleukine plot}
+tidytpm_notmulti <- outTPMnotmulti %>%
+  filter(GeneSymbol %in% ilifn$geneSymbol) %>% 
+  pivot_longer(-c('Symbol','GeneSymbol'), names_to = 'lib', 
+               values_to = 'tpm') %>%
+  mutate(lib = as.double(lib)) %>% 
+  full_join(pheno, by = c('lib' = 'Sample')) %>% 
+  unite("ClassDay", Class:Day) %>% 
+  mutate(protocol = "NotMulti")
+
+tidytpm_multi <- outTPMmulti %>%
+  filter(GeneSymbol %in% ilifn$geneSymbol) %>% 
+  pivot_longer(-c('Symbol','GeneSymbol'), names_to = 'lib', 
+               values_to = 'tpm') %>%
+  mutate(lib = as.double(lib)) %>% 
+  full_join(pheno, by = c('lib' = 'Sample')) %>% 
+  unite("ClassDay", Class:Day) %>% 
+  mutate(protocol = "Multi")
+
+tidytpm <- tidytpm_multi %>%
+  bind_rows(tidytpm_notmulti)
+
+
+# Violin Plot 75 genes  
+tidytpm %>%
+  ggplot(aes(ClassDay, log10(tpm+1), fill = protocol)) +
+  geom_violin() +
+  facet_wrap(~GeneSymbol) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+# Correlation plot
+corplot <- tidytpm  %>% 
+  pivot_wider(names_from = protocol, values_from = tpm) %>% 
+  ggplot(aes(x = log2(Multi + 1), y = log2(NotMulti +1), )) +
+  geom_point() +
+  stat_cor(label.y = 9.5, digits = 3) +
+  geom_smooth(method='lm', formula= y~x) +
+  theme_bw()
+
+ggsave(here("results","figures","corplot_Multi_Notmulti.png"), corplot, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 1.5)
+
+```
+

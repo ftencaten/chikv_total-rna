@@ -1,0 +1,20 @@
+---
+title: "R Notebook"
+---
+
+# Loadd libraries
+```{r}
+library(here)
+library(tidyverse)
+```
+
+# Load files
+```{r}
+stat <- read_tsv(here("results", "alingment_stat.txt"), col_names = F)
+
+out <- stat %>% 
+  pivot_wider(names_from = X2, values_from = X3)
+
+write_tsv(out, here("results","alingment_stat_wider.txt"))
+```
+
