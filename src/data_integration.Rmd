@@ -1,0 +1,46 @@
+---
+title: "Data integration"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r Load libraries}
+library(here)
+library(tidyverse)
+library(mixOmics)
+```
+
+```{r Load files}
+pheno <- read_tsv(here("data", "phenodata.tsv"))
+
+total <- read_tsv(here("data", "gene_expression",
+                       "counts_NOTmultimapping_TPM.tsv"))
+
+micro <- read_tsv(here("data", "microRNA_sequencing", 
+                       "mature_sense_minExpr1_RCadj_edger_TMMnormTable.csv"))
+```
+
+```{r Pre-process}
+# Rename colnames miRNA dataset
+micro.rn <- micro %>% 
+  rename_with(~ sub("X", "", .)) %>% 
+  rename_with(~ sub("_trim", "", .)) %>% 
+  column_to_rownames(var = "name")
+
+# Select top variant genes from total RNA-seq dataset 
+total.var <- apply(total[,-c(1:2)], 1, var)
+names(total.var) <- total$Symbol
+
+slctd.genes <- names(total.var[order(total.var, decreasing = T)])[1:5000]
+
+# Filter top variant genes and select samples included in miRNA study
+total.flt <- total %>% 
+  filter(Symbol %in% slctd.genes) %>% 
+  column_to_rownames(var = "GeneSymbol") %>% 
+  dplyr::select(-Symbol) %>% 
+  dplyr::select(colnames(micro.rn))
+
+# List with transposed tibbles
+data <- list(totalRNA = t(total.flt), miRNA = t(micro.rn))
+```
+
