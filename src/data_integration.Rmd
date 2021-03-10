@@ -42,6 +42,5 @@ total.flt <- total %>%
 
 # List with transposed tibbles
 data <- list(totalRNA = t(total.flt), miRNA = t(micro.rn))
-
 ```
 
