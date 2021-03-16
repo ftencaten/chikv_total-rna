@@ -77,8 +77,7 @@ stat_multi <- read_tsv(here("data", "geneCounts",
 
 x <- stat_notmulti %>% 
   bind_rows(stat_multi) %>% 
-  filter(Status == "Assigned") 
-%>% 
+  filter(Status == "Assigned") %>% 
   ggplot(aes(x = lib, y = reads, fill = protocol)) +
   geom_bar(stat = "identity", position=position_dodge()) +
   scale_fill_manual(values = brewer.pal(3,"RdYlBu")[c(1,3)]) +

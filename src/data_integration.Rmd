@@ -7,18 +7,26 @@ editor_options:
 ```{r Load libraries}
 library(here)
 library(tidyverse)
+library(edgeR)
 library(mixOmics)
 ```
 
 ```{r Load files}
+# CSBL CHIKV phenodata
 sra.csbl <- read_csv(here("data", "chikv_csbl_star", "SraRunTable.txt"))
 
 sup.csbl <- read_tsv(here("data", "chikv_csbl_star", "ppat.1007880.s001.csv"))
 
-pheno <- read_tsv(here("data", "phenodata.tsv"))
+# Arbobios phenodata
+pheno.arbo <- read_tsv(here("data", "phenodata.tsv"))
+
+# Human genome annotation
+hannot <- read_tsv(here("data", 
+                        "Homo_sapiens.GRCh38.100_gene_annotation_table.txt"))
 
 # CSBL read count
-counts_csbl <- read_tsv(here("data", "chikv_csbl_star", "CountTable.tsv"))
+counts_csbl <- read_tsv(here("data", "chikv_csbl_star", "CountTable.tsv")) %>% 
+  rename(Symbol = genes)
 
 # Arbobobios read count
 counts_arbo <- read_tsv(here("data", "geneCounts",
@@ -26,9 +34,9 @@ counts_arbo <- read_tsv(here("data", "geneCounts",
   rename_with(~ sub(".Aligned.sortedByCoord.out.bam", "", .x), 
               ends_with("bam")) %>% 
   rename_with(~ sub("19017", "", .x), everything()) %>% 
-  rename_with(~ sub("Aligned.out.bam", "", .x), everything()) %>% 
+  rename_with(~ sub("Aligned.out.bam", "", .x), everything()) %>%
+  rename_with(~ paste0("ARB", .x), -Symbol) %>%
   dplyr::select("Symbol", sort(colnames(.)))
-
 
 total <- read_tsv(here("data", "gene_expression",
                        "counts_NOTmultimapping_TPM.tsv"))
@@ -37,12 +45,75 @@ micro <- read_tsv(here("data", "microRNA_sequencing",
                        "mature_sense_minExpr1_RCadj_edger_TMMnormTable.csv"))
 ```
 
-```{r Pre-process CSBL data}
+```{r Join CSBL and Arbobios phenodata + counts}
 pheno.csbl <- sra.csbl %>% 
-  full_join(sup.csbl, by = c("Sample Name" = "Subject_ID")) %>% 
-  dplyr::select(Run, Label, Status, Days_of_symptoms_Cat, Arthralgia_Chronicity)
+  full_join(sup.csbl, by = c("Sample Name" = "Subject_ID")) %>%
+  mutate(condition = if_else(Sample_type == "Control", "healthy", 
+                             "infected")) %>% 
+  dplyr::select(Run, Label, Days_of_symptoms_Cat, Arthralgia_Chronicity,
+                condition) %>% 
+  mutate(day = if_else(Days_of_symptoms_Cat == "Control", NA_character_, 
+                        Days_of_symptoms_Cat)) %>% 
+  mutate(disease.status = case_when(Arthralgia_Chronicity == "ND" ~ NA_character_,
+                             Arthralgia_Chronicity == "Y" ~ "chronic",
+                             Arthralgia_Chronicity == "N" ~ "nonChronic"))
 
+pheno <- pheno.arbo %>%
+  rename(Run = Sample, day = Day) %>% 
+  mutate(disease.status = ifelse(Class == "control", "nonChronic", Class)) %>% 
+  mutate(condition = "infected") %>% 
+  dplyr::select(-Class, - Batch) %>%
+  mutate(Run = paste0("ARB", Run)) %>% 
+  bind_rows(pheno.csbl %>% dplyr::select(Run, condition, day, 
+                                         disease.status)) %>%
+  mutate(phase = case_when(day == "D21" ~ "late",
+                           day == "D20" ~ "late",
+                           day == "D0" ~ "early",
+                           day == "D0or1" ~ "early",
+                           day == "D2" ~ "early",
+                           day == "D3or4" ~ "early",
+                           TRUE ~ NA_character_)) %>% 
+  relocate(Run, condition, day, phase, disease.status) %>% 
+  mutate(dataset = case_when(day == "D0" ~ "arbobios",
+                           day == "D21" ~ "arbobios",
+                           TRUE ~ "csbl"))
+
+rawcount <- counts_arbo %>% 
+  full_join(counts_csbl, by = "Symbol")
 ```
+
+```{r}
+expr <- DGEList(counts = rawcount[,-1], 
+                genes = hannot[,c(1,2,4)],
+                group = paste(pheno$condition, pheno$phase, 
+                              pheno$disease.status, sep = "_"))
+
+expr <- calcNormFactors(expr, method = "TMM")
+
+tmm.counts <- cpm(expr, log = F)
+rownames(tmm.counts) <- rawcount$Symbol
+
+annot <- pheno[,c(2,4,6)]
+rownames(annot) <- pheno$Run
+
+# Select most variant genes
+genes.var <- apply(tmm.counts, 1, var)
+selectedGenes <- names(genes.var[order(genes.var, decreasing = T)][1:500])
+
+M <- log2(t(tmm.counts[selectedGenes,]) + 1)
+
+pcaResults <- prcomp(M)
+
+pca <- autoplot(pcaResults, data = as.data.frame(annot), 
+                colour = "dataset", shape = "condition") +
+  scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
+  theme_bw()
+
+ggsave(here("results","figures","PCA_Arbobios_CSBL_dataset.png"), pca, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2)
+```
+
 
 ```{r Pre-process}
 # Rename colnames miRNA dataset
