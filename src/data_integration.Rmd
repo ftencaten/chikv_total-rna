@@ -11,13 +11,37 @@ library(mixOmics)
 ```
 
 ```{r Load files}
+sra.csbl <- read_csv(here("data", "chikv_csbl_star", "SraRunTable.txt"))
+
+sup.csbl <- read_tsv(here("data", "chikv_csbl_star", "ppat.1007880.s001.csv"))
+
 pheno <- read_tsv(here("data", "phenodata.tsv"))
+
+# CSBL read count
+counts_csbl <- read_tsv(here("data", "chikv_csbl_star", "CountTable.tsv"))
+
+# Arbobobios read count
+counts_arbo <- read_tsv(here("data", "geneCounts",
+                          "rawCounts_featureCounts_NOTmultimapping.tsv")) %>%
+  rename_with(~ sub(".Aligned.sortedByCoord.out.bam", "", .x), 
+              ends_with("bam")) %>% 
+  rename_with(~ sub("19017", "", .x), everything()) %>% 
+  rename_with(~ sub("Aligned.out.bam", "", .x), everything()) %>% 
+  dplyr::select("Symbol", sort(colnames(.)))
+
 
 total <- read_tsv(here("data", "gene_expression",
                        "counts_NOTmultimapping_TPM.tsv"))
 
 micro <- read_tsv(here("data", "microRNA_sequencing", 
                        "mature_sense_minExpr1_RCadj_edger_TMMnormTable.csv"))
+```
+
+```{r Pre-process CSBL data}
+pheno.csbl <- sra.csbl %>% 
+  full_join(sup.csbl, by = c("Sample Name" = "Subject_ID")) %>% 
+  dplyr::select(Run, Label, Status, Days_of_symptoms_Cat, Arthralgia_Chronicity)
+
 ```
 
 ```{r Pre-process}
