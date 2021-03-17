@@ -76,13 +76,16 @@ pheno <- pheno.arbo %>%
   relocate(Run, condition, day, phase, disease.status) %>% 
   mutate(dataset = case_when(day == "D0" ~ "arbobios",
                            day == "D21" ~ "arbobios",
-                           TRUE ~ "csbl"))
+                           TRUE ~ "csbl")) %>% 
+  mutate(condition = as.factor(condition)) %>% 
+  mutate(dataset = as.factor(dataset))
 
 rawcount <- counts_arbo %>% 
-  full_join(counts_csbl, by = "Symbol")
+  full_join(counts_csbl, by = "Symbol") %>% 
+  relocate(Symbol, pheno$Run)
 ```
 
-```{r}
+```{r Normalization + PCA}
 expr <- DGEList(counts = rawcount[,-1], 
                 genes = hannot[,c(1,2,4)],
                 group = paste(pheno$condition, pheno$phase, 
@@ -93,8 +96,11 @@ expr <- calcNormFactors(expr, method = "TMM")
 tmm.counts <- cpm(expr, log = F)
 rownames(tmm.counts) <- rawcount$Symbol
 
-annot <- pheno[,c(2,4,6)]
-rownames(annot) <- pheno$Run
+
+annot <- pheno %>% 
+  dplyr::select(Run, condition, phase, dataset) %>% 
+  mutate(phase = ifelse(is.na(phase) == T, "healthy", phase)) %>% 
+  column_to_rownames('Run')
 
 # Select most variant genes
 genes.var <- apply(tmm.counts, 1, var)
@@ -112,6 +118,43 @@ pca <- autoplot(pcaResults, data = as.data.frame(annot),
 ggsave(here("results","figures","PCA_Arbobios_CSBL_dataset.png"), pca, 
        device = "png", width = 10, height = 6, units = "cm", 
        dpi = "print", scale = 2)
+```
+
+
+```{r Combat-seq}
+library(sva)
+
+df <- as.matrix(rawcount[,-1])
+rownames(df) <- rawcount$Symbol
+
+phase <- ifelse(is.na(pheno$phase) == T, 'healthy', pheno$phase)
+
+x <- ComBat_seq(df, pheno$dataset, pheno$condition)
+y <- ComBat_seq(df, batch = pheno$dataset, group = NULL, 
+                covar_mod = cbind(pheno$condition, as.factor(phase)))
+
+## x
+expr.adj <- DGEList(counts = x, 
+                    genes = hannot[,c(1,2,4)],
+                    group = paste(pheno$condition, pheno$phase, 
+                                  pheno$disease.status, sep = "_"))
+
+expr.adj <- calcNormFactors(expr.adj, method = "TMM")
+
+tmm.counts.adj <- cpm(expr.adj, log = F)
+
+# Select most variant genes
+genes.var <- apply(tmm.counts.adj, 1, var)
+selectedGenes <- names(genes.var[order(genes.var, decreasing = T)][1:500])
+
+M <- log2(t(tmm.counts.adj[selectedGenes,]) + 1)
+
+pcaResults <- prcomp(M)
+
+autoplot(pcaResults, data = as.data.frame(annot), 
+                colour = "phase", shape = "dataset") +
+  scale_color_manual(values = brewer.pal(3, "Dark2")) +
+  theme_bw()
 ```
 
 
