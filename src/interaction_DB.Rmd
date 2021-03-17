@@ -12,13 +12,37 @@ library(tidyverse)
 ```{r Load files}
 gene2prtn <- read_tsv(here("data", "interaction_DB", "mart_export.txt"))
 
+hgnc2prtn <- read_tsv(here("data", "interaction_DB", "hgnc2prtn.txt"))
+
 intdb <- read_delim(here("data", "interaction_DB",
                        "9606.protein.physical.links.v11.0.txt"), delim = " ")
 ```
 
-```{r}
+```{r Ensembl}
 # remove duplications
 gene2prtnd <- gene2prtn %>% distinct()
+
+# FIlter out interactions with score less than 400
+out <- intdb %>% 
+  filter(combined_score >= 400) %>% 
+  select(-combined_score) %>%
+  mutate(protein1 = sub("9606.", "", protein1)) %>%
+  mutate(protein2 = sub("9606.", "", protein2)) %>% 
+  inner_join(hgnc2prtnd, by = c("protein1" = "Protein stable ID"))  %>% 
+  select(-protein1) %>% 
+  rename(gene1 = "HGNC symbol") %>% 
+  inner_join(hgnc2prtnd, by = c("protein2" = "Protein stable ID")) %>%
+  select(-protein2) %>% 
+  rename(gene2 = "HGNC symbol") %>% 
+  distinct() 
+
+write_tsv(out, here("data", "interaction_DB",
+                    "9606.gene.physical.links.STRINGv11_HGNC.tsv"))
+```
+
+```{r HGNC}
+# remove duplications
+hgnc2prtnd <- hgnc2prtn %>% distinct()
 
 # FIlter out interactions with score less than 400
 out <- intdb %>% 
@@ -37,4 +61,3 @@ out <- intdb %>%
 write_tsv(out, here("data", "interaction_DB",
                     "9606.gene.physical.links.STRINGv11.tsv"))
 ```
-

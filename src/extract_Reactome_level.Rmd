@@ -8,6 +8,7 @@ editor_options:
 library(here)
 library(tidyverse)
 library(igraph)
+library(ActivePathways)
 ```
 
 ```{r Load files}
@@ -21,6 +22,11 @@ tln <- read_tsv(here("data", "reactome_data", "topLevel_nodes_reactome.txt"))
 # Pathways hierarchy relationship
 hch <- read_tsv(here("data", "reactome_data", "ReactomePathwaysRelation.txt"),
                 col_names = F)
+
+
+# Reactome pathways gmt
+react.gmt <- read.GMT(here("data", "reactome_data", 
+                           "ReactomePathways_20210317.gmt"))
 ```
 
 ```{r Get third level nodes}
@@ -42,13 +48,20 @@ third_level <- unique(unlist(apply(as.data.frame(tln), 1, getlevel)))
 ```
 
 ```{r Filter third level nodes}
+# Ensembl2reactome
 gmt <- reactome_all %>%
   filter(X2 %in% third_level) %>% 
   filter(grepl("ENSG", X1)) %>% 
   dplyr::select(term = X4, gene = X1)
 
-write_tsv(gmt, here("data","reactome_data",
-                    "ReactomePathwaysLevel3_ensembl_2021-02.tsv"))
+#write_tsv(gmt, here("data","reactome_data",
+#                    "ReactomePathwaysLevel3_ensembl_2021-02.tsv"))
+
+# GMT Objet
+third_level_gmt <- Filter(function(term) term$name %in% third_level, react.gmt)
+
+write.GMT(third_level_gmt, here("data", "reactome_data",
+                                "ReactomePathwaysLevel3_2021-03.gmt"))
 
 ```
 
