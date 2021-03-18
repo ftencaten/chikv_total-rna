@@ -20,12 +20,21 @@ pheno <- read.delim(here("data", "phenodata.tsv"))
 tpm_notmulti <- read_tsv(here("data", "gene_expression", 
                               "counts_NOTmultimapping_TPM.tsv"))
 
+# CPM Not multimapping
+cpm_notmulti <- read_tsv(here("data", "gene_expression", 
+                              "counts_NOTmultimapping_CPM.tsv"))
+
+# TMM Not multimapping
+tmm_notmulti <- read_tsv(here("data", "gene_expression", 
+                              "counts_NOTmultimapping_TMM.tsv"))
+
+
 # TPM counts multimapping reads
 tpm_multi <- read_tsv(here("data", "gene_expression", 
                            "counts_multimapping_TPM.tsv"))
 
-gmt.reactn <- read_tsv(here("data", "reactome_data", 
-                            "ReactomePathwaysLevel3_ensembl_2021-02.tsv"))
+gmt.reactn <- read_gmt(here("data", "reactome_data", 
+                            "ReactomePathwaysLevel3_2021-03.gmt"))
 
 #gmt.react <- read.gmt(gmtfile = here("data", "ReactomePathwaysLevel3.gmt"))
 #gmt.btm <- read.gmt(gmtfile = here("data","BTM_for_GSEA_20131008.gmt"))
@@ -34,7 +43,7 @@ gmt.reactn <- read_tsv(here("data", "reactome_data",
 #int_df <- read.delim(int_fname)
 
 int_df <- read_tsv(here("data", "interaction_DB", 
-                        "9606.gene.physical.links.STRINGv11.tsv")) %>% 
+                        "9606.gene.physical.links.STRINGv11_HGNC.tsv")) %>% 
   as.data.frame()
 ```
 
@@ -49,24 +58,25 @@ counts <- as.data.frame(tpm_notmulti[!duplicated(tpm_notmulti$GeneSymbol),])
 rownames(counts) <- counts$GeneSymbol
 
 cem.reactome <- cemitool(expr = counts[,-c(1:2)], annot = smpl.annot, 
-                         gmt = gmt.react, interactions = int_df, apply_vst = T, 
+                         gmt = gmt.reactn, interactions = int_df, apply_vst = T, 
                          gsea_max_size = 2e3, verbose = TRUE)
 
 cem.btm <- cemitool(expr = counts[,-c(1:2)], annot = smpl.annot, 
                     gmt = gmt.btm, interactions = int_df, apply_vst = T, 
                     gsea_max_size = 2e3, verbose = TRUE)
 
-# Reactome
-generate_report(cem.reactome, title = "notMultimapping_Reactome",
+# Reactome TPM
+generate_report(cem.reactome, title = "notMultimapping_Reactome_HGNC_TPM",
                 directory = here("results", "CEMiTool", "Report",
-                                 "notMultimapping_Reactome"))
-diagnostic_report(cem.reactome, title = "notMultimapping_Reactome",
+                                 "notMultimapping_Reactome_HGNC_TPM"))
+diagnostic_report(cem.reactome, title = "notMultimapping_Reactome_HGNC_TPM",
                   directory = here("results", "CEMiTool", "Diagnostic",
-                                   "notMultimapping_Reactome"))
-save_plots(cem.reactome, "all", directory = here("results", "CEMiTool", "Plots",
-                                                 "notMultimapping_Reactome"))
+                                   "notMultimapping_Reactome_HGNC_TPM"))
+save_plots(cem.reactome, "all", 
+           directory = here("results", "CEMiTool", "Plots",
+                            "notMultimapping_Reactome_HGNC_TPM"))
 
-# BTM
+# BTM TPM
 generate_report(cem.btm, title = "notMultimapping_BTM",
                 directory = here("results", "CEMiTool", "Report",
                                  "notMultimapping_BTM"))
@@ -75,6 +85,43 @@ diagnostic_report(cem.btm, title = "notMultimapping_BTM",
                                    "notMultimapping_BTM"))
 save_plots(cem.btm, "all", directory = here("results", "CEMiTool", "Plots",
                                             "notMultimapping_BTM"))
+
+
+# Reactome CPM
+cpm.counts <- as.data.frame(cpm_notmulti[!duplicated(cpm_notmulti$GeneSymbol),])
+rownames(cpm.counts) <- cpm.counts$GeneSymbol
+
+cem.reactome.cpm <- cemitool(expr = cpm.counts[,-c(1:2)], annot = smpl.annot, 
+                         gmt = gmt.reactn, interactions = int_df, apply_vst = T, 
+                         gsea_max_size = 2e3, verbose = TRUE)
+
+generate_report(cem.reactome.cpm, title = "notMultimapping_Reactome_HGNC_CPM",
+                directory = here("results", "CEMiTool", "Report",
+                                 "notMultimapping_Reactome_HGNC_CPM"), force = T)
+diagnostic_report(cem.reactome.cpm, title = "notMultimapping_Reactome_HGNC_CPM",
+                  directory = here("results", "CEMiTool", "Diagnostic",
+                                   "notMultimapping_Reactome_HGNC_CPM"), force= T)
+save_plots(cem.reactome.cpm, "all", 
+           directory = here("results", "CEMiTool", "Plots",
+                            "notMultimapping_Reactome_HGNC_CPM"), force = T)
+
+# Reactome TMM
+tmm.counts <- as.data.frame(tmm_notmulti[!duplicated(tmm_notmulti$GeneSymbol),])
+rownames(tmm.counts) <- tmm.counts$GeneSymbol
+
+cem.reactome.tmm <- cemitool(expr = tmm.counts[,-c(1:2)], annot = smpl.annot, 
+                         gmt = gmt.reactn, interactions = int_df, apply_vst = T, 
+                         gsea_max_size = 2e3, verbose = TRUE)
+
+generate_report(cem.reactome.tmm, title = "notMultimapping_Reactome_HGNC_TMM",
+                directory = here("results", "CEMiTool", "Report",
+                                 "notMultimapping_Reactome_HGNC_TMM"))
+diagnostic_report(cem.reactome.tmm, title = "notMultimapping_Reactome_HGNC_TMM",
+                  directory = here("results", "CEMiTool", "Diagnostic",
+                                   "notMultimapping_Reactome_HGNC_TMM"))
+save_plots(cem.reactome.tmm, "all", 
+           directory = here("results", "CEMiTool", "Plots",
+                            "notMultimapping_Reactome_HGNC_TMM"))
 ```
 
 ```{r CEMiTool Multimapping}

@@ -12,7 +12,6 @@ library(ggfortify)
 library(RColorBrewer)
 library(sva)
 library(CEMiTool)
-library(mixOmics)
 ```
 
 ```{r Load files}
@@ -48,12 +47,6 @@ gmt.reactn <- read_gmt(here("data", "reactome_data",
 int_df <- read_tsv(here("data", "interaction_DB", 
                         "9606.gene.physical.links.STRINGv11_HGNC.tsv")) %>% 
   as.data.frame()
-
-total <- read_tsv(here("data", "gene_expression",
-                       "counts_NOTmultimapping_TPM.tsv"))
-
-micro <- read_tsv(here("data", "microRNA_sequencing", 
-                       "mature_sense_minExpr1_RCadj_edger_TMMnormTable.csv"))
 ```
 
 ```{r Join CSBL and Arbobios phenodata + counts}
@@ -242,28 +235,3 @@ save_plots(cem.reactome.cpm, "all",
            directory = here("results", "CEMiTool", "Plots",
                             "CSBL_Arbobios_integration CPM"), force = T)
 ```
-
-```{r Pre-process}
-# Rename colnames miRNA dataset
-micro.rn <- micro %>% 
-  rename_with(~ sub("X", "", .)) %>% 
-  rename_with(~ sub("_trim", "", .)) %>% 
-  column_to_rownames(var = "name")
-
-# Select top variant genes from total RNA-seq dataset 
-total.var <- apply(total[,-c(1:2)], 1, var)
-names(total.var) <- total$Symbol
-
-slctd.genes <- names(total.var[order(total.var, decreasing = T)])[1:5000]
-
-# Filter top variant genes and select samples included in miRNA study
-total.flt <- total %>% 
-  filter(Symbol %in% slctd.genes) %>% 
-  column_to_rownames(var = "GeneSymbol") %>% 
-  dplyr::select(-Symbol) %>% 
-  dplyr::select(colnames(micro.rn))
-
-# List with transposed tibbles
-data <- list(totalRNA = t(total.flt), miRNA = t(micro.rn))
-```
-
