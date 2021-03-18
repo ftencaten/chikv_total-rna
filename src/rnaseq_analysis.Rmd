@@ -93,8 +93,8 @@ ggsave(here("results","figures", "featureCount_stats.png"), plotstat,
 ```
 
 
-```{r Normalization TPM}
-# Not multimapping
+```{r Normalization}
+# Not multimapping TPM
 countnotmulti <- rawcount_notmulti %>%
   full_join(hannot[,1:2], by = c('Symbol' = 'gene_id')) %>% 
   inner_join(gl, by = c('Symbol' = 'gene_id')) %>% 
@@ -111,6 +111,27 @@ outTPMnotmulti <- TPMnotmulti %>%
 
 #write_tsv(outTPMnotmulti,
 #          here("data", "gene_expression", "counts_NOTmultimapping_TPM.tsv"))
+
+# Not multimapping CPM + TMM
+group <- factor(paste(pheno$Class, pheno$Day, sep = "_"))
+
+expr <- DGEList(counts = rawcount_notmulti[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+expr.norm.fact <- calcNormFactors(expr, method = 'TMM')
+
+tmm.counts <- cpm(expr.norm.fact, log = F)
+out.tmm.counts <- cbind(hannot[,1:2], tmm.counts)
+
+#write_tsv(out.tmm.counts,
+#          here("data", "gene_expression", "counts_NOTmultimapping_TMM.tsv"))
+
+cpm.counts <- cpm(expr, log = F)
+out.cpm.counts <- cbind(hannot[,1:2], cpm.counts)
+
+#write_tsv(out.cpm.counts,
+#          here("data", "gene_expression", "counts_NOTmultimapping_CPM.tsv"))
 
 # Multimapping
 countmulti <- rawcount_multi %>%
