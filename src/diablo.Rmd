@@ -11,17 +11,27 @@ library(mixOmics)
 ```
 
 ```{r Load files}
+# DEGs
+degs <- read_tsv(here("results", "DEG_edgeR", 
+                      "diff_express_all_comparisons_notmulti.tsv"))
+
 # Arbobios phenodata
 pheno.arbo <- read_tsv(here("data", "phenodata.tsv"))
 
+# Gene expression - TPM
 total <- read_tsv(here("data", "gene_expression",
                        "counts_NOTmultimapping_TPM.tsv"))
 
+# miRNA expression - TMM
 micro <- read_tsv(here("data", "microRNA_sequencing", 
                        "mature_sense_minExpr1_RCadj_edger_TMMnormTable.csv"))
 ```
 
 ```{r Pre-process}
+# Filter DEGs
+fdegs <- degs %>% 
+  filter(FDR_chronVSctrl < 0.05)
+
 # Rename colnames miRNA dataset
 micro.rn <- micro %>% 
   rename_with(~ sub("X", "", .)) %>% 
@@ -31,12 +41,13 @@ micro.rn <- micro %>%
 
 # Filter low expressed genes
 total.df <- total %>% 
-  filter(!duplicated(GeneSymbol)) %>% 
+  filter(Symbol %in% fdegs$gene_id) %>% 
   column_to_rownames("GeneSymbol") %>% 
   dplyr::select(-Symbol)
 
 slctd.genes <- edgeR::filterByExpr(total.df, min.count = 1)
-total.df <- total.df[slctd.genes,colnames(micro.rn)]
+#total.df <- total.df[slctd.genes,colnames(micro.rn)]
+total.df <- total.df[, colnames(micro.rn)]
 
 # List with transposed tibbles
 data <- list(totalRNA = t(total.df), miRNA = t(micro.rn))
@@ -58,11 +69,12 @@ sgccda.res <- block.splsda(X = data, Y = slct.pheno$Class,
                            ncomp = 10,  design = design)
 
 set.seed(123)
-perf.diablo = perf(sgccda.res, validation = 'Mfold', folds = 10, nrepeat = 10)
+perf.diablo = perf(sgccda.res, validation = 'Mfold', folds = 5, nrepeat = 5)
 
 plot(perf.diablo)
 
 ncomp = perf.diablo$choice.ncomp$WeightedVote["Overall.BER", "centroids.dist"]
+
 
 ```
 
