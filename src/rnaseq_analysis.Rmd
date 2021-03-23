@@ -12,9 +12,15 @@ library(EDASeq)
 library(pheatmap)
 library(ggfortify)
 library(RColorBrewer)
+
+options(scipen=999)
 ```
 
 ```{r Load files}
+# Immune response genes
+immgene <- read_tsv(here("data", "immune_response_GO0006955_genes.txt"),
+                    col_names = F)
+
 # Human genome annotation
 hannot <- read_tsv(here("data", 
                         "Homo_sapiens.GRCh38.100_gene_annotation_table.txt"))
@@ -38,17 +44,20 @@ rawcount_notmulti <- read_tsv(here("data", "geneCounts",
   dplyr::select("Symbol", sort(colnames(.)))
 
 # Read multimapping file
-rawcount_multi <- read_tsv(here("data", "geneCounts",
-                          "rawCounts_featureCounts_multimapping.tsv")) %>%
-  rename_with(~ sub(".Aligned.sortedByCoord.out.bam", "", .x), 
-              ends_with("bam")) %>% 
-  rename_with(~ sub("19017", "", .x), everything()) %>% 
-  rename_with(~ sub("Aligned.out.bam", "", .x), everything()) %>% 
-  dplyr::select("Symbol", sort(colnames(.)))
+#rawcount_multi <- read_tsv(here("data", "geneCounts",
+#                          "rawCounts_featureCounts_multimapping.tsv")) %>%
+#  rename_with(~ sub(".Aligned.sortedByCoord.out.bam", "", .x), 
+#              ends_with("bam")) %>% 
+#  rename_with(~ sub("19017", "", .x), everything()) %>% 
+#  rename_with(~ sub("Aligned.out.bam", "", .x), everything()) %>% 
+#  dplyr::select("Symbol", sort(colnames(.)))
   
 # Reactome gene set
 gene_set <- read_tsv(here("data", "reactome_data", 
                           "ReactomePathwaysLevel3_ensembl_2021-02.tsv"))
+
+gene_set2 <- CEMiTool::read_gmt(here("data", "reactome_data", 
+                          "ReactomePathways_20210317.gmt"))
 
 # Read file with 75 interferon and interleukine genes
 ilifn <- read_tsv(here("data", "IFN_IL_list.txt"))
@@ -124,8 +133,6 @@ expr.norm.fact <- calcNormFactors(expr, method = 'TMM')
 tmm.counts <- cpm(expr.norm.fact, log = F)
 out.tmm.counts <- cbind(hannot[,1:2], tmm.counts)
 
-#write_tsv(out.tmm.counts,
-#          here("data", "gene_expression", "counts_NOTmultimapping_TMM.tsv"))
 
 cpm.counts <- cpm(expr, log = F)
 out.cpm.counts <- cbind(hannot[,1:2], cpm.counts)
@@ -134,24 +141,23 @@ out.cpm.counts <- cbind(hannot[,1:2], cpm.counts)
 #          here("data", "gene_expression", "counts_NOTmultimapping_CPM.tsv"))
 
 # Multimapping
-countmulti <- rawcount_multi %>%
-  full_join(hannot[,1:2], by = c('Symbol' = 'gene_id')) %>%
-  inner_join(gl, by = c('Symbol' = 'gene_id')) %>% 
-  relocate(Symbol, GeneSymbol, gene_length)
+#countmulti <- rawcount_multi %>%
+#  full_join(hannot[,1:2], by = c('Symbol' = 'gene_id')) %>%
+#  inner_join(gl, by = c('Symbol' = 'gene_id')) %>% 
+#  relocate(Symbol, GeneSymbol, gene_length)
 
-TPMmulti <- scater::calculateTPM(countmulti[,-c(1:3)], countmulti$gene_length)
+#TPMmulti <- scater::calculateTPM(countmulti[,-c(1:3)], countmulti$gene_length)
 
-outTPMmulti <- TPMmulti %>% 
-  as_tibble() %>% 
-  mutate(Symbol = countmulti$Symbol, 
-         GeneSymbol = countmulti$GeneSymbol) %>% 
-  relocate(Symbol, GeneSymbol)
+#outTPMmulti <- TPMmulti %>% 
+#  as_tibble() %>% 
+#  mutate(Symbol = countmulti$Symbol, 
+#         GeneSymbol = countmulti$GeneSymbol) %>% 
+#  relocate(Symbol, GeneSymbol)
 
 #write_tsv(outTPMmulti,
 #          here("data", "gene_expression", "counts_multimapping_TPM.tsv"))
 
 ```
-
 
 ```{r Heatmap}
 # Not multimapping
@@ -176,21 +182,21 @@ ggsave(here("results","figures","Heatmap_notmulti.png"), heatmap_notmulti,
        dpi = "print", scale = 2)
 
 # Multimapping
-normcount_multi <- edgeR::cpm(rawcount_multi[,-1])
-rownames(normcount_multi) <- rawcount_multi$Symbol
+#normcount_multi <- edgeR::cpm(rawcount_multi[,-1])
+#rownames(normcount_multi) <- rawcount_multi$Symbol
 
-V_multi <- apply(normcount_multi, 1, var)
+#V_multi <- apply(normcount_multi, 1, var)
 
-selectedGenes_multi <- names(V_multi[order(V_multi, decreasing = T)][1:500])
+#selectedGenes_multi <- names(V_multi[order(V_multi, decreasing = T)][1:500])
 
-heatmap_multi <- pheatmap(normcount_multi[selectedGenes_multi,], 
-                          scale = 'row', show_rownames = F, 
-                          annotation_col = as.data.frame(annot),
-                          show_colnames = F)
+#heatmap_multi <- pheatmap(normcount_multi[selectedGenes_multi,], 
+#                          scale = 'row', show_rownames = F, 
+#                          annotation_col = as.data.frame(annot),
+#                          show_colnames = F)
 
-ggsave(here("results","figures","Heatmap_multi.png"), heatmap_multi, 
-       device = "png", width = 10, height = 6, units = "cm", 
-       dpi = "print", scale = 2)
+#ggsave(here("results","figures","Heatmap_multi.png"), heatmap_multi, 
+#       device = "png", width = 10, height = 6, units = "cm", 
+#       dpi = "print", scale = 2)
 ```
 
 ```{r RLE}
@@ -207,17 +213,17 @@ plotRLE(cpm(rawcount_notmulti[,-1]), outline=FALSE, col = colors[pheno$Class],
         ylab= "Relative Log Expression")
 
 # Multimapping
-plotRLE(as.matrix(rawcount_multi[,-1]), outline = FALSE, 
-        col = colors[pheno$Class], ylim = c(-4, 4), 
-        main = "Raw counts - Multimapping", ylab= "Relative Log Expression")
+#plotRLE(as.matrix(rawcount_multi[,-1]), outline = FALSE, 
+#        col = colors[pheno$Class], ylim = c(-4, 4), 
+#        main = "Raw counts - Multimapping", ylab= "Relative Log Expression")
 
-plotRLE(cpm(rawcount_multi[,-1]), outline=FALSE, col = colors[pheno$Class],
-        ylim = c(-4, 4), main = "CPM - Multimapping", 
-        ylab= "Relative Log Expression")
+#plotRLE(cpm(rawcount_multi[,-1]), outline=FALSE, col = colors[pheno$Class],
+#        ylim = c(-4, 4), main = "CPM - Multimapping", 
+#        ylab= "Relative Log Expression")
 ```
 
 ```{r PCA}
-# Not multimapping
+# Not multimapping CPM
 M_notmulti <- t(normcount_notmulti[selectedGenes_notmulti,])
 
 M_notmulti <- log2(M_notmulti + 1)
@@ -229,25 +235,49 @@ pca_notmulti <- autoplot(pcaResults_notmulti, data = as.data.frame(annot),
   scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
   theme_bw()
 
-ggsave(here("results","figures","PCA_notmulti.png"), pca_notmulti, 
+ggsave(here("results","figures","PCA_notmulti_CPM.png"), pca_notmulti, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 1)
+
+# Not multimapping TMM
+rownames(out.tmm.counts) <- out.tmm.counts$gene_id
+  
+V_notmulti_tmm <- apply(out.tmm.counts[,-c(1:2)], 1, var)
+
+selectedGenes_notmulti_tmm <- names(V_notmulti_tmm[order(V_notmulti_tmm, 
+                                                       decreasing = T)][1:500])
+
+
+M_notmulti_tmm <- t(out.tmm.counts[selectedGenes_notmulti_tmm, -c(1:2)])
+
+M_notmulti_tmm <- log2(M_notmulti_tmm + 1)
+
+pcaResults_notmulti_tmm <- prcomp(M_notmulti_tmm)
+
+pca_notmulti_tmm <- autoplot(pcaResults_notmulti_tmm, data = as.data.frame(annot), 
+         colour = 'Day', shape = "Class", main = "NotMulti TMM") +
+  scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
+  theme_bw()
+
+ggsave(here("results","figures","PCA_notmulti_TMM.png"), pca_notmulti_tmm, 
        device = "png", width = 10, height = 6, units = "cm", 
        dpi = "print", scale = 1)
 
 # Multimapping
-M_multi <- t(normcount_multi[selectedGenes_multi,])
+#M_multi <- t(normcount_multi[selectedGenes_multi,])
 
-M_multi <- log2(M_multi + 1)
+#M_multi <- log2(M_multi + 1)
 
-pcaResults_multi <- prcomp(M_multi)
+#pcaResults_multi <- prcomp(M_multi)
 
-pca_multi <- autoplot(pcaResults_multi, data = as.data.frame(annot), 
-         colour = 'Day', shape = "Class") +
-  scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
-  theme_bw()
+#pca_multi <- autoplot(pcaResults_multi, data = as.data.frame(annot), 
+#         colour = 'Day', shape = "Class") +
+#  scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
+#  theme_bw()
 
-ggsave(here("results","figures","PCA_multi.png"), pca_multi, 
-       device = "png", width = 10, height = 6, units = "cm", 
-       dpi = "print", scale = 1)
+#ggsave(here("results","figures","PCA_multi_CPM.png"), pca_multi, 
+#       device = "png", width = 10, height = 6, units = "cm", 
+#       dpi = "print", scale = 1)
 ```
 
 ```{r DE analysis Not multimapping}
@@ -267,6 +297,18 @@ y <- y[keep, , keep.lib.sizes=FALSE]
 # Norm factors
 y <- calcNormFactors(y)
 #plotMDS(y, col = brewer.pal(4,"Set2")[group], labels = group)
+
+tmm <- cpm(y)
+rownames(tmm) <- y$genes$gene_id
+
+out.tmm <- tmm %>% 
+  as.data.frame() %>% 
+  rownames_to_column('gene_id') %>% 
+  left_join(hannot[,c(1,2,4)]) %>% 
+  relocate("gene_id", "GeneSymbol", "Class")
+
+#write_tsv(out.tmm,
+#          here("data", "gene_expression", "counts_NOTmultimapping_TMM.tsv"))
 
 # Estimate Dispersion
 y <- estimateDisp(y, design)
@@ -298,7 +340,22 @@ ctrlD21VSctrlD0_t <- topTags(ctrlD21VSctrlD0, n = NULL)$table
 chronVSctrl_t <- topTags(chronVSctrl, n = NULL)$table
 D21VSD0_t <- topTags(D21VSD0, n = NULL)$table
 
-edger.output.notmulti <- chronVSctrl.D0_t %>%
+meanTMM <- cbind(y$genes[,1:3],
+                 rowMeans(tmm[,group == 'control_D0']), 
+                 rowMeans(tmm[,group == 'control_D21']),
+                 rowMeans(tmm[,group == 'chronic_D0']),
+                 rowMeans(tmm[,group == 'chronic_D21']))
+
+colnames(meanTMM) <- c("gene_id", "GeneSymbol", "Class",
+                       'control_D0_TMM', 'control_D21_TMM', 
+                       'chronic_D0_TMM', 'chronic_D21_TMM')
+
+#write_tsv(meanTMM,
+#          here("results", "DEG_edgeR", 
+#               "meanTMM_by_group_notmulti.tsv"))
+
+edger.output.notmulti <- meanTMM %>% 
+  full_join(chronVSctrl.D0_t, by = c("gene_id","GeneSymbol","Class")) %>% 
   full_join(chronVSctrl.D21_t, by = c("gene_id","GeneSymbol","Class"), 
             suffix = c("_chronVSctrl.D0", "_chronVSctrl.D21")) %>% 
   full_join(chronD21VSchronD0_t, by = c("gene_id","GeneSymbol","Class")) %>% 
@@ -344,28 +401,157 @@ edger.output.notmulti %>%
 
 ```
 
+```{r Volcano Plot}
+##### Volcano plot function (NO label)
+volc_plot <- function(topTags.out, df = immgene) {
+  up <- topTags.out %>% filter(logFC > 1 & FDR < 0.1)
+  
+  down <- topTags.out %>% filter(logFC < -1 & FDR < 0.1)
+  
+  topTags.out %>% 
+    ggplot(aes(logFC, -log10(FDR))) +
+    geom_point(color = "grey", size = 0.8) +
+    geom_point(data = up ,
+               aes(logFC, -log10(FDR)), color = "#EF8A62", size = 0.8) +
+    geom_point(data = down,
+               aes(logFC, -log10(FDR)), color = "#67A9CF", size = 0.8) +
+    geom_vline(xintercept = c(-log2(2), log2(2)), linetype="dashed", 
+                  color = "red", size = 0.3) +
+    geom_hline(yintercept = -log10(0.1), linetype="dashed", color = "red", 
+               size = 0.3) +
+#    geom_text_repel(data = up %>%
+#                      bind_rows(down) %>% 
+#                      filter(GeneSymbol %in% df$X1), 
+#                    aes(label = GeneSymbol), min.segment.length = 0,
+#                    max.overlaps = Inf, size = 3) +
+    theme_classic()
+}
+
+# chronVSctrl.D0
+chronVSctrl.D0_vp <- volc_plot(chronVSctrl.D0_t)
+
+# chronVSctrl.D21
+chronVSctrl.D21_vp <- volc_plot(chronVSctrl.D21_t)
+
+# chronD21VSchronD0
+chronD21VSchronD0_vp <- volc_plot(chronD21VSchronD0_t)
+
+# ctrlD21VSctrlD0
+ctrlD21VSctrlD0_vp <- volc_plot(ctrlD21VSctrlD0_t)
+
+# chronVSctrl
+chronVSctrl_vp <- volc_plot(chronVSctrl_t)
+
+# D21VSD0
+D21VSD0_vp <- volc_plot(D21VSD0_t)
+
+patchw <- (chronVSctrl.D0_vp | chronVSctrl.D21_vp) /
+  (chronD21VSchronD0_vp|ctrlD21VSctrlD0_vp)/
+  (chronVSctrl_vp|D21VSD0_vp)
+
+fp <- patchw + plot_annotation(tag_levels = 'A')
+
+ggsave(here("results","figures","volcanoPlot_all_comparisons_Notmulti.png"), fp, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2.5)
+
+###### Volcano plot function WITH label
+volc_plot_la <- function(topTags.out, df = immgene) {
+  up <- topTags.out %>% filter(logFC > 1 & FDR < 0.1)
+  
+  down <- topTags.out %>% filter(logFC < -1 & FDR < 0.1)
+  
+  topTags.out %>% 
+    ggplot(aes(logFC, -log10(FDR))) +
+    geom_point(color = "grey") +
+    geom_point(data = up ,
+               aes(logFC, -log10(FDR)), color = "#EF8A62", size = 2.5) +
+    geom_point(data = down,
+               aes(logFC, -log10(FDR)), color = "#67A9CF", size = 2.5) +
+    geom_vline(xintercept = c(-log2(2), log2(2)), linetype="dashed", 
+                  color = "red", size = 0.3) +
+    geom_hline(yintercept = -log10(0.1), linetype="dashed", color = "red", 
+               size = 0.3) +
+    geom_text_repel(data = up %>%
+                      bind_rows(down) %>% 
+                      filter(GeneSymbol %in% df$X1), 
+                    aes(label = GeneSymbol), min.segment.length = 0,
+                    max.overlaps = Inf, size = 3) +
+    theme_classic()
+}
+
+# chronVSctrl.D0
+chronVSctrl.D0_vp_la <- volc_plot_la(chronVSctrl.D0_t)
+
+ggsave(here("results","figures","volcanoPlot_chronVSctrl.D0_Notmulti.png"),
+       chronVSctrl.D0_vp_la, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2.5)
+
+# chronVSctrl.D21
+chronVSctrl.D21_vp_la <- volc_plot_la(chronVSctrl.D21_t)
+
+ggsave(here("results","figures","volcanoPlot_chronVSctrl.D21_Notmulti.png"),
+       chronVSctrl.D21_vp_la, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2.5)
+
+# chronD21VSchronD0
+chronD21VSchronD0_vp_la <- volc_plot_la(chronD21VSchronD0_t)
+
+ggsave(here("results","figures","volcanoPlot_chronD21VSchronD0_Notmulti.png"),
+       chronD21VSchronD0_vp_la, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2.5)
+
+# ctrlD21VSctrlD0
+ctrlD21VSctrlD0_vp_la <- volc_plot_la(ctrlD21VSctrlD0_t)
+
+ggsave(here("results","figures","volcanoPlot_ctrlD21VSctrlD0_Notmulti.png"),
+       ctrlD21VSctrlD0_vp_la, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2.5)
+
+# chronVSctrl
+chronVSctrl_vp_la <- volc_plot_la(chronVSctrl_t)
+
+ggsave(here("results","figures","volcanoPlot_chronVSctrl_Notmulti.png"),
+       chronVSctrl_vp_la, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2.5)
+
+# D21VSD0
+D21VSD0_vp_la <- volc_plot_la(D21VSD0_t)
+
+ggsave(here("results","figures","volcanoPlot_D21VSD0_Notmulti.png"),
+       D21VSD0_vp_la, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2.5)
+```
+
 ```{r Gene set enrichment analysis - Not multimapping}
-term.list <- split(gene_set, as.factor(gene_set$term))
+## edgeR CAMERA
+term.list <- split(gene_set2, as.factor(gene_set2$term))
 path.list <- lapply(term.list, function(x) return(unname(as_vector(x[,2]))))
 
-idx <- ids2indices(path.list, id = y$genes$gene_id)
+idx <- ids2indices(path.list, id = y$genes$GeneSymbol)
 
-chronVSctrl.D0.enrich <- camera(y, idx, design, inter.gene.cor = 0.01,
+chronVSctrl.D0.enrich <- camera(y, idx, design, inter.gene.cor = 0.05,
                                 contrast = my.contrast[, "chronVSctrl.D0"])
 
-chronVSctrl.D21.enrich <- camera(y, idx, design, inter.gene.cor=0.01,
+chronVSctrl.D21.enrich <- camera(y, idx, design, inter.gene.cor=0.05,
                                  contrast = my.contrast[, "chronVSctrl.D21"])
 
-chronD21VSchronD0.enrich <- camera(y, idx, design, inter.gene.cor=0.01,
+chronD21VSchronD0.enrich <- camera(y, idx, design, inter.gene.cor=0.05,
                                    contrast = my.contrast[, "chronD21VSchronD0"])
 
-ctrlD21VSctrlD0.enrich <- camera(y, idx, design, inter.gene.cor=0.01,
+ctrlD21VSctrlD0.enrich <- camera(y, idx, design, inter.gene.cor=0.05,
                                   contrast = my.contrast[, "ctrlD21VSctrlD0"])
 
-chronVSctrl.enrich <- camera(y, idx, design, inter.gene.cor=0.01,
+chronVSctrl.enrich <- camera(y, idx, design, inter.gene.cor=0.05,
                              contrast = my.contrast[, "chronVSctrl"])
 
-D21VSD0.enrich <- camera(y, idx, design, inter.gene.cor=0.01,
+D21VSD0.enrich <- camera(y, idx, design, inter.gene.cor=0.05,
                              contrast = my.contrast[, "D21VSD0"])
 
 
@@ -374,6 +560,128 @@ barcodeplot(D21VSD0_t$logFC,
             labels=c("D21","D0"),
             main="G2/M Checkpoints",
             alpha=1)
+
+## fgsea
+pathways <- gmtPathways(here("data", "reactome_data", 
+                             "ReactomePathwaysLevel3.gmt"))
+
+# chronVSctrl.D0
+ranks_chronVSctrl.D0 <- chronVSctrl.D0_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_chronVSctrl.D0 <- fgsea(pathways=pathways, 
+                                       stats=ranks_chronVSctrl.D0, eps=0)
+
+# chronVSctrl.D21
+ranks_chronVSctrl.D21 <- chronVSctrl.D21_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_chronVSctrl.D21 <- fgsea(pathways=pathways, 
+                                       stats=ranks_chronVSctrl.D21, eps=0)
+
+# chronVSctrl
+ranks_chronVSctrl <- chronVSctrl_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_chronVSctrl <- fgsea(pathways=pathways, 
+                                       stats=ranks_chronVSctrl, eps=0)
+
+# chronD21VSchronD0
+ranks_chronD21VSchronD0 <- chronD21VSchronD0_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_chronD21VSchronD0 <- fgsea(pathways=pathways, 
+                                    stats=ranks_chronD21VSchronD0, eps=0)
+
+# ctrlD21VSctrlD0
+ranks_ctrlD21VSctrlD0 <- ctrlD21VSctrlD0_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_ctrlD21VSctrlD0 <- fgsea(pathways=pathways, 
+                                    stats=ranks_ctrlD21VSctrlD0, eps=0)
+
+# D21VSD0
+ranks_D21VSD0 <- D21VSD0_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_D21VSD0 <- fgsea(pathways=pathways, stats=ranks_D21VSD0, eps=0)
+
+
+fgseaRes <- fgseaRes_chronVSctrl.D0 %>% 
+  as_tibble() %>% 
+  select(pathway, padj, NES) %>% 
+  full_join(fgseaRes_chronVSctrl.D21 %>% 
+              as_tibble() %>% 
+              select(pathway, padj, NES), by = "pathway", 
+            suffix = c("_chronVSctrl.D0", "_chronVSctrl.D21")) %>% 
+  full_join(fgseaRes_chronVSctrl %>% 
+              as_tibble() %>% 
+              select(pathway, padj, NES), by = "pathway") %>% 
+  full_join(fgseaRes_chronD21VSchronD0 %>% 
+              as_tibble() %>% 
+              select(pathway, padj, NES), by = "pathway", 
+            suffix = c("_chronVSctrl", "_chronD21VSchronD0")) %>% 
+  full_join(fgseaRes_ctrlD21VSctrlD0 %>% 
+              as_tibble() %>% 
+              select(pathway, padj, NES), by = "pathway") %>%
+  full_join(fgseaRes_D21VSD0 %>% 
+              as_tibble() %>% 
+              select(pathway, padj, NES), by = "pathway", 
+            suffix = c("_ctrlD21VSctrlD0", "_D21VSD0")) 
+  
+nes <- fgseaRes %>% 
+  filter(if_any(starts_with('padj'), ~ . < 0.01)) %>%
+  column_to_rownames("pathway") %>% 
+  dplyr::select(starts_with("NES"))
+
+padj <- fgseaRes %>% 
+  filter(if_any(starts_with('padj'), ~ . < 0.01)) %>% 
+  column_to_rownames("pathway") %>% 
+  dplyr::select(starts_with("padj"))
+
+col3 <- colorRampPalette(c("blue", "white", "red"))
+
+corrplot::corrplot(as.matrix(t(nes)), p.mat = as.matrix(t(padj)), is.corr = F,
+                   sig.level = .01, insig = "blank", tl.cex = 0.5, 
+                   col = col3(100), tl.srt = 45)
+
+fgseaResTidy <- fgseaRes %>%
+  as_tibble() %>%
+  arrange(padj)
+
+#ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES)) +
+#  geom_col(aes(fill=padj<0.05)) +
+#  coord_flip() +
+#  labs(x="Pathway", y="Normalized Enrichment Score",
+#       title="Hallmark pathways NES from GSEA") + 
+#  theme_minimal()
+
+#plotEnrichment(pathways.hallmark[[head(fgseaRes[order(pval), ], 1)$pathway]],
+#               ranks) + labs(title=head(fgseaRes[order(pval), ], 1)$pathway)
 ```
 
 ```{r DE analysis Multimapping}
@@ -469,7 +777,7 @@ x <- outTPMnotmulti %>%
   unite("ClassDay", Class:Day)
 
 x %>% 
-  filter(GeneSymbol == "CAMK1D") %>% 
+  filter(GeneSymbol == "EIF1AY") %>% 
   ggplot(aes(ClassDay, log2(tpm+1))) +
   geom_boxplot()
 ```
