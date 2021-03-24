@@ -1,5 +1,5 @@
 ---
-title: "Reactome level"
+title: "Extract third level Reactome pathways"
 editor_options: 
   chunk_output_type: console
 ---
@@ -22,7 +22,6 @@ tln <- read_tsv(here("data", "reactome_data", "topLevel_nodes_reactome.txt"))
 # Pathways hierarchy relationship
 hch <- read_tsv(here("data", "reactome_data", "ReactomePathwaysRelation.txt"),
                 col_names = F)
-
 
 # Reactome pathways gmt
 react.gmt <- read.GMT(here("data", "reactome_data", 
@@ -63,5 +62,10 @@ third_level_gmt <- Filter(function(term) term$name %in% third_level, react.gmt)
 write.GMT(third_level_gmt, here("data", "reactome_data",
                                 "ReactomePathwaysLevel3_2021-03.gmt"))
 
+```
+
+```{r Reactome tree structure}
+ff <- apply(as.data.frame(tln), 1, 
+            function(x) names(which(sort(shortest.paths(graph_hrel)[,x]) != Inf)))
 ```
 

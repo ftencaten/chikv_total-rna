@@ -12,6 +12,7 @@ library(EDASeq)
 library(pheatmap)
 library(ggfortify)
 library(RColorBrewer)
+library(fgsea)
 
 options(scipen=999)
 ```
@@ -53,16 +54,15 @@ rawcount_notmulti <- read_tsv(here("data", "geneCounts",
 #  dplyr::select("Symbol", sort(colnames(.)))
   
 # Reactome gene set
-gene_set <- read_tsv(here("data", "reactome_data", 
-                          "ReactomePathwaysLevel3_ensembl_2021-02.tsv"))
+#gene_set <- read_tsv(here("data", "reactome_data", 
+#                          "ReactomePathwaysLevel3_ensembl_2021-02.tsv"))
 
-gene_set2 <- CEMiTool::read_gmt(here("data", "reactome_data", 
-                          "ReactomePathways_20210317.gmt"))
+gene_set <- gmtPathways(here("data", "reactome_data", 
+                             "ReactomePathwaysLevel3_2021-03.gmt"))
 
 # Read file with 75 interferon and interleukine genes
 ilifn <- read_tsv(here("data", "IFN_IL_list.txt"))
 ```
-
 
 ```{r Alignment Stat}
 # feature count stat not multimapping
@@ -101,7 +101,6 @@ ggsave(here("results","figures", "featureCount_stats.png"), plotstat,
 
 ```
 
-
 ```{r Normalization}
 # Not multimapping TPM
 countnotmulti <- rawcount_notmulti %>%
@@ -131,8 +130,11 @@ expr <- DGEList(counts = rawcount_notmulti[,-1],
 expr.norm.fact <- calcNormFactors(expr, method = 'TMM')
 
 tmm.counts <- cpm(expr.norm.fact, log = F)
-out.tmm.counts <- cbind(hannot[,1:2], tmm.counts)
+out.tmm.counts <- cbind(hannot[,c(1,2,4)], tmm.counts)
 
+#write_tsv(out.tmm.counts,
+#          here("data", "gene_expression", 
+#               "counts_NOTmultimapping_TMM_allGenes.tsv"))
 
 cpm.counts <- cpm(expr, log = F)
 out.cpm.counts <- cbind(hannot[,1:2], cpm.counts)
@@ -280,7 +282,7 @@ ggsave(here("results","figures","PCA_notmulti_TMM.png"), pca_notmulti_tmm,
 #       dpi = "print", scale = 1)
 ```
 
-```{r DE analysis Not multimapping}
+```{r DE analysis Not multimapping - edgeR}
 group <- factor(paste(pheno$Class, pheno$Day, sep = "_"))
 
 #Not multimapping
@@ -308,7 +310,8 @@ out.tmm <- tmm %>%
   relocate("gene_id", "GeneSymbol", "Class")
 
 #write_tsv(out.tmm,
-#          here("data", "gene_expression", "counts_NOTmultimapping_TMM.tsv"))
+#          here("data", "gene_expression", 
+#               "counts_NOTmultimapping_TMM_filtered_20k.tsv"))
 
 # Estimate Dispersion
 y <- estimateDisp(y, design)
@@ -531,28 +534,41 @@ ggsave(here("results","figures","volcanoPlot_D21VSD0_Notmulti.png"),
 
 ```{r Gene set enrichment analysis - Not multimapping}
 ## edgeR CAMERA
-term.list <- split(gene_set2, as.factor(gene_set2$term))
-path.list <- lapply(term.list, function(x) return(unname(as_vector(x[,2]))))
+#term.list <- split(gene_set, as.factor(gene_set$term))
+#path.list <- lapply(term.list, function(x) return(unname(as_vector(x[,2]))))
+#idx <- ids2indices(path.list, id = y$genes$GeneSymbol)
 
-idx <- ids2indices(path.list, id = y$genes$GeneSymbol)
+idx <- ids2indices(gene_set, id = y$genes$GeneSymbol)
 
-chronVSctrl.D0.enrich <- camera(y, idx, design, inter.gene.cor = 0.05,
-                                contrast = my.contrast[, "chronVSctrl.D0"])
+chronVSctrl.D0.enrich <- camera(y, idx, design, 
+                                contrast = my.contrast[, "chronVSctrl.D0"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
 
-chronVSctrl.D21.enrich <- camera(y, idx, design, inter.gene.cor=0.05,
-                                 contrast = my.contrast[, "chronVSctrl.D21"])
+chronVSctrl.D21.enrich <- camera(y, idx, design, 
+                                 contrast = my.contrast[, "chronVSctrl.D21"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
 
-chronD21VSchronD0.enrich <- camera(y, idx, design, inter.gene.cor=0.05,
-                                   contrast = my.contrast[, "chronD21VSchronD0"])
+chronD21VSchronD0.enrich <- camera(y, idx, design,
+                                   contrast = my.contrast[, "chronD21VSchronD0"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
 
-ctrlD21VSctrlD0.enrich <- camera(y, idx, design, inter.gene.cor=0.05,
-                                  contrast = my.contrast[, "ctrlD21VSctrlD0"])
+ctrlD21VSctrlD0.enrich <- camera(y, idx, design, 
+                                  contrast = my.contrast[, "ctrlD21VSctrlD0"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
 
-chronVSctrl.enrich <- camera(y, idx, design, inter.gene.cor=0.05,
-                             contrast = my.contrast[, "chronVSctrl"])
+chronVSctrl.enrich <- camera(y, idx, design, 
+                             contrast = my.contrast[, "chronVSctrl"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
 
-D21VSD0.enrich <- camera(y, idx, design, inter.gene.cor=0.05,
-                             contrast = my.contrast[, "D21VSD0"])
+D21VSD0.enrich <- camera(y, idx, design,
+                             contrast = my.contrast[, "D21VSD0"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
 
 
 barcodeplot(D21VSD0_t$logFC,
@@ -561,9 +577,33 @@ barcodeplot(D21VSD0_t$logFC,
             main="G2/M Checkpoints",
             alpha=1)
 
+stat <- chronVSctrl.D0.enrich %>% 
+  slice_head(n = 10) %>% 
+  dplyr::select(pathway, stat) %>% 
+  full_join(chronVSctrl.D21.enrich %>%
+              slice_head(n = 10) %>% 
+               dplyr::select(pathway, stat), by = "pathway", 
+            suffix = c("_chronVSctrl.D0", "_chronVSctrl.D21")) %>% 
+  full_join(chronVSctrl.enrich %>%
+              slice_head(n = 10) %>%
+              dplyr::select(pathway, stat), by = "pathway") %>% 
+  full_join(chronD21VSchronD0.enrich %>% 
+              slice_head(n = 10) %>%
+               dplyr::select(pathway, stat), by = "pathway", 
+            suffix = c("_chronVSctrl", "_chronD21VSchronD0")) %>%
+  full_join(ctrlD21VSctrlD0.enrich %>% 
+              slice_head(n = 10) %>%
+               dplyr::select(pathway, stat), by = "pathway") %>%
+  full_join(D21VSD0.enrich %>% 
+              slice_head(n = 10) %>%
+               dplyr::select(pathway, stat), by = "pathway",
+            suffix = c("_ctrlD21VSctrlD0", "_D21VSD0")) %>% 
+  column_to_rownames("pathway") %>% 
+  rename_all(~ sub("stat_", "", .x)) %>% 
+  mutate_all(~ case_when(is.na(.) ~ 0, TRUE ~ .))
+  
+
 ## fgsea
-pathways <- gmtPathways(here("data", "reactome_data", 
-                             "ReactomePathwaysLevel3.gmt"))
 
 # chronVSctrl.D0
 ranks_chronVSctrl.D0 <- chronVSctrl.D0_t %>% 
@@ -573,7 +613,7 @@ ranks_chronVSctrl.D0 <- chronVSctrl.D0_t %>%
   summarize(rank=mean(rank)) %>% 
   deframe()
 
-fgseaRes_chronVSctrl.D0 <- fgsea(pathways=pathways, 
+fgseaRes_chronVSctrl.D0 <- fgsea(pathways=gene_set, 
                                        stats=ranks_chronVSctrl.D0, eps=0)
 
 # chronVSctrl.D21
@@ -584,7 +624,7 @@ ranks_chronVSctrl.D21 <- chronVSctrl.D21_t %>%
   summarize(rank=mean(rank)) %>% 
   deframe()
 
-fgseaRes_chronVSctrl.D21 <- fgsea(pathways=pathways, 
+fgseaRes_chronVSctrl.D21 <- fgsea(pathways=gene_set, 
                                        stats=ranks_chronVSctrl.D21, eps=0)
 
 # chronVSctrl
@@ -595,7 +635,7 @@ ranks_chronVSctrl <- chronVSctrl_t %>%
   summarize(rank=mean(rank)) %>% 
   deframe()
 
-fgseaRes_chronVSctrl <- fgsea(pathways=pathways, 
+fgseaRes_chronVSctrl <- fgsea(pathways=gene_set, 
                                        stats=ranks_chronVSctrl, eps=0)
 
 # chronD21VSchronD0
@@ -606,7 +646,7 @@ ranks_chronD21VSchronD0 <- chronD21VSchronD0_t %>%
   summarize(rank=mean(rank)) %>% 
   deframe()
 
-fgseaRes_chronD21VSchronD0 <- fgsea(pathways=pathways, 
+fgseaRes_chronD21VSchronD0 <- fgsea(pathways=gene_set, 
                                     stats=ranks_chronD21VSchronD0, eps=0)
 
 # ctrlD21VSctrlD0
@@ -617,7 +657,7 @@ ranks_ctrlD21VSctrlD0 <- ctrlD21VSctrlD0_t %>%
   summarize(rank=mean(rank)) %>% 
   deframe()
 
-fgseaRes_ctrlD21VSctrlD0 <- fgsea(pathways=pathways, 
+fgseaRes_ctrlD21VSctrlD0 <- fgsea(pathways=gene_set, 
                                     stats=ranks_ctrlD21VSctrlD0, eps=0)
 
 # D21VSD0
@@ -628,9 +668,9 @@ ranks_D21VSD0 <- D21VSD0_t %>%
   summarize(rank=mean(rank)) %>% 
   deframe()
 
-fgseaRes_D21VSD0 <- fgsea(pathways=pathways, stats=ranks_D21VSD0, eps=0)
+fgseaRes_D21VSD0 <- fgsea(pathways=gene_set, stats=ranks_D21VSD0, eps=0)
 
-
+# Join fgsea results
 fgseaRes <- fgseaRes_chronVSctrl.D0 %>% 
   as_tibble() %>% 
   select(pathway, padj, NES) %>% 
@@ -644,34 +684,54 @@ fgseaRes <- fgseaRes_chronVSctrl.D0 %>%
   full_join(fgseaRes_chronD21VSchronD0 %>% 
               as_tibble() %>% 
               select(pathway, padj, NES), by = "pathway", 
-            suffix = c("_chronVSctrl", "_chronD21VSchronD0")) %>% 
+            suffix = c("_chronVSctrl", "_chronD21VSchronD0")) %>%
   full_join(fgseaRes_ctrlD21VSctrlD0 %>% 
               as_tibble() %>% 
               select(pathway, padj, NES), by = "pathway") %>%
   full_join(fgseaRes_D21VSD0 %>% 
               as_tibble() %>% 
-              select(pathway, padj, NES), by = "pathway", 
-            suffix = c("_ctrlD21VSctrlD0", "_D21VSD0")) 
-  
+              select(pathway, padj, NES), by = "pathway",
+            suffix = c("_ctrlD21VSctrlD0", "_D21VSD0"))
+
 nes <- fgseaRes %>% 
-  filter(if_any(starts_with('padj'), ~ . < 0.01)) %>%
   column_to_rownames("pathway") %>% 
   dplyr::select(starts_with("NES"))
 
 padj <- fgseaRes %>% 
-  filter(if_any(starts_with('padj'), ~ . < 0.01)) %>% 
   column_to_rownames("pathway") %>% 
   dplyr::select(starts_with("padj"))
 
-col3 <- colorRampPalette(c("blue", "white", "red"))
+#fgseaRes_Tidy_chronVSctrl <- fgseaRes_chronVSctrl.D0 %>% 
+#  as_tibble() %>% 
+#  select(pathway, padj, NES) %>% 
+#  full_join(fgseaRes_chronVSctrl.D21 %>% 
+#              as_tibble() %>% 
+#              select(pathway, padj, NES), by = "pathway", 
+#            suffix = c("_chronVSctrl.D0", "_chronVSctrl.D21")) %>% 
+#  full_join(fgseaRes_chronVSctrl %>% 
+#              as_tibble() %>% 
+#              select(pathway, padj, NES), by = "pathway") %>% 
+#  dplyr::rename(padj_chronVSctrl = padj, NES_chronVSctrl = NES)
 
-corrplot::corrplot(as.matrix(t(nes)), p.mat = as.matrix(t(padj)), is.corr = F,
-                   sig.level = .01, insig = "blank", tl.cex = 0.5, 
-                   col = col3(100), tl.srt = 45)
+#fgseaRes_Tidy_D21VSD0 <- fgseaRes_chronD21VSchronD0 %>% 
+#  as_tibble() %>% 
+#  select(pathway, padj, NES) %>%  
+#  full_join(fgseaRes_ctrlD21VSctrlD0 %>% 
+#              as_tibble() %>% 
+#              select(pathway, padj, NES), by = "pathway",
+#            suffix = c("_chronD21VSchronD0", "_ctrlD21VSctrlD0")) %>%
+#  full_join(fgseaRes_D21VSD0 %>% 
+#              as_tibble() %>% 
+#              select(pathway, padj, NES), by = "pathway") %>% 
+#  dplyr::rename(padj_D21VSD0 = padj, NES_D21VSD0 = NES)
+  
+#nes_chronVSctrl <- fgseaRes_Tidy_chronVSctrl %>% 
+#  column_to_rownames("pathway") %>% 
+#  dplyr::select(starts_with("NES"))
 
-fgseaResTidy <- fgseaRes %>%
-  as_tibble() %>%
-  arrange(padj)
+#padj_chronVSctrl <- fgseaRes_Tidy_chronVSctrl %>% 
+#  column_to_rownames("pathway") %>% 
+#  dplyr::select(starts_with("padj"))
 
 #ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES)) +
 #  geom_col(aes(fill=padj<0.05)) +
@@ -682,6 +742,97 @@ fgseaResTidy <- fgseaRes %>%
 
 #plotEnrichment(pathways.hallmark[[head(fgseaRes[order(pval), ], 1)$pathway]],
 #               ranks) + labs(title=head(fgseaRes[order(pval), ], 1)$pathway)
+```
+
+```{r GSEA Heatmap}
+pcut = 0.05
+
+nes <- stat
+
+nes <- nes[rowSums(nes > -log10(pcut) | nes < -log10(pcut) *-1) >= 1, , drop=FALSE]
+
+custom_pal <- c("#053061", "#2166AC", "#4393C3", "#92C5DE",
+                "#D1E5F0", "#FFFFFF", "#FDDBC7", "#F4A582",
+                "#D6604D", "#B2182B", "#67001F")
+
+custom_pal <- colorRampPalette(custom_pal)(200)
+
+nes <- as.matrix(nes)
+
+nes[which(nes < -log10(pcut) & nes > -log10(pcut)*-1, arr.ind=TRUE)] <- 0
+
+#if(nrow(nes) > 2){
+#  row_order <- rownames(nes)[hclust(dist(nes))$order]
+#} else {
+#  row_order <- rownames(nes)
+#}
+
+nes_melted <- reshape2::melt(nes)
+colnames(nes_melted) <- c("Pathway", "Class", "stat")
+
+nes_melted$Pathway <- factor(nes_melted$Pathway)
+nes_melted$Class <- factor(nes_melted$Class, 
+                           levels = c("chronVSctrl.D0", "chronVSctrl.D21", "chronVSctrl",
+                                      "chronD21VSchronD0", "ctrlD21VSctrlD0", "D21VSD0"))
+
+max_abs_nes <- max(abs(nes_melted$stat))
+        
+
+
+res <- ggplot(nes_melted, aes_(x=~Class, y=~Pathway, size=~abs(stat), fill=~stat)) +
+  geom_point(color = "white", shape=21) +
+  scale_fill_gradientn(colours=custom_pal, space = "Lab",
+                       limits=c(-max_abs_nes, max_abs_nes)) +
+  scale_size(range=c(0,5), limits=c(0, NA)) +
+  guides(size="none") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(), 
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1)) 
+
+
+ggsave(here("results","figures","enrichPlot_DEGS_NotMulti.png"), res, 
+       device = "png", width = 9, height = 6.5, units = "cm", 
+       dpi = "print", scale = 2)
+
+
+############## FGSEA
+
+pcut = 0.0001
+
+padj <- padj[rowSums(padj < pcut) >= 1, , drop=FALSE]
+nes <- nes[rownames(padj), , drop=FALSE]
+
+custom_pal <- c("#053061", "#2166AC", "#4393C3", "#92C5DE",
+                "#D1E5F0", "#FFFFFF", "#FDDBC7", "#F4A582",
+                "#D6604D", "#B2182B", "#67001F")
+
+custom_pal <- colorRampPalette(custom_pal)(200)
+
+nes <- as.matrix(nes)
+padj <- as.matrix(padj)
+nes[which(padj > pcut, arr.ind=TRUE)] <- 0
+
+if(nrow(nes) > 2){
+  row_order <- rownames(nes)[hclust(dist(nes))$order]
+} else {
+  row_order <- rownames(nes)
+}
+
+nes_melted <- reshape2::melt(nes)
+colnames(nes_melted) <- c("Module", "Class", "NES")
+nes_melted$Module <- factor(nes_melted$Module, levels=row_order)
+nes_melted$Class <- as.character(nes_melted$Class)
+max_abs_nes <- max(abs(nes_melted$NES))
+        
+ggplot(nes_melted, aes_(x=~Class, y=~Module, size=~abs(NES), fill=~NES)) +
+  geom_point(color = "white", shape=21) +
+  scale_fill_gradientn(colours=custom_pal, space = "Lab",
+                       limits=c(-max_abs_nes, max_abs_nes)) +
+  scale_size(range=c(0,5), limits=c(0, NA)) +
+  guides(size="none") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank()) 
+
 ```
 
 ```{r DE analysis Multimapping}
@@ -768,7 +919,7 @@ edger.output.multi %>%
   filter(logFC_D21VSD0 < -1 & FDR_D21VSD0 < 0.1) %>% nrow()
 ```
 
-```{r Plot}
+```{r Plot individual genes for inspection}
 x <- outTPMnotmulti %>% 
   pivot_longer(-c('Symbol','GeneSymbol'), names_to = 'lib', 
                values_to = 'tpm') %>%

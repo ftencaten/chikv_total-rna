@@ -8,30 +8,28 @@ editor_options:
 library(here)
 library(CEMiTool)
 library(tidyverse)
-library(clusterProfiler)
 ```
-
 
 ```{r Load files}
 # Phenodata
 pheno <- read.delim(here("data", "phenodata.tsv"))  
 
 # TPM nomr count Not multimapping reads
-tpm_notmulti <- read_tsv(here("data", "gene_expression", 
-                              "counts_NOTmultimapping_TPM.tsv"))
+#tpm_notmulti <- read_tsv(here("data", "gene_expression", 
+#                              "counts_NOTmultimapping_TPM.tsv"))
 
 # CPM Not multimapping
-cpm_notmulti <- read_tsv(here("data", "gene_expression", 
-                              "counts_NOTmultimapping_CPM.tsv"))
+#cpm_notmulti <- read_tsv(here("data", "gene_expression", 
+#                              "counts_NOTmultimapping_CPM.tsv"))
 
 # TMM Not multimapping
 tmm_notmulti <- read_tsv(here("data", "gene_expression", 
-                              "counts_NOTmultimapping_TMM.tsv"))
+                              "counts_NOTmultimapping_TMM_allGenes.tsv"))
 
 
 # TPM counts multimapping reads
-tpm_multi <- read_tsv(here("data", "gene_expression", 
-                           "counts_multimapping_TPM.tsv"))
+#tpm_multi <- read_tsv(here("data", "gene_expression", 
+#                           "counts_multimapping_TPM.tsv"))
 
 gmt.reactn <- read_gmt(here("data", "reactome_data", 
                             "ReactomePathwaysLevel3_2021-03.gmt"))
@@ -54,6 +52,7 @@ smpl.annot <- pheno %>%
   rename(SampleName = Sample) %>% 
   mutate(SampleName = as.character(SampleName))
 
+# TPM
 counts <- as.data.frame(tpm_notmulti[!duplicated(tpm_notmulti$GeneSymbol),])
 rownames(counts) <- counts$GeneSymbol
 
@@ -106,17 +105,24 @@ save_plots(cem.reactome.cpm, "all",
                             "notMultimapping_Reactome_HGNC_CPM"), force = T)
 
 # Reactome TMM
-tmm.counts <- as.data.frame(tmm_notmulti[!duplicated(tmm_notmulti$GeneSymbol),])
-rownames(tmm.counts) <- tmm.counts$GeneSymbol
+# Remove duplicated genes in GeneSymbol by taking the most expressed
+tmm.counts <- tmm_notmulti %>% 
+  select(-gene_id, -Class) %>% 
+  mutate(meanexpr = rowMeans(across(is.numeric))) %>% 
+  group_by(GeneSymbol) %>% 
+  slice_max(meanexpr, with_ties = F) %>% 
+  select(-meanexpr) %>% 
+  column_to_rownames("GeneSymbol") %>% 
+  as.data.frame()
 
-cem.reactome.tmm <- cemitool(expr = tmm.counts[,-c(1:2)], annot = smpl.annot, 
-                         gmt = gmt.reactn, interactions = int_df, apply_vst = T, 
-                         gsea_max_size = 2e3, verbose = TRUE)
+cem.reactome.tmm <- cemitool(expr = tmm.counts, annot = smpl.annot, 
+                         gmt = gmt.reactn, interactions = int_df, 
+                         apply_vst = T, gsea_max_size = 2e3, verbose = TRUE)
 
-generate_report(cem.reactome.tmm, title = "notMultimapping_Reactome_HGNC_TMM",
+generate_report(cem.reactome.tmm, title = "notMultimapping_Reactome3_HGNC_TMM",
                 directory = here("results", "CEMiTool", "Report",
                                  "notMultimapping_Reactome_HGNC_TMM"))
-diagnostic_report(cem.reactome.tmm, title = "notMultimapping_Reactome_HGNC_TMM",
+diagnostic_report(cem.reactome.tmm, title = "notMultimapping_Reactome3_HGNC_TMM",
                   directory = here("results", "CEMiTool", "Diagnostic",
                                    "notMultimapping_Reactome_HGNC_TMM"))
 save_plots(cem.reactome.tmm, "all", 

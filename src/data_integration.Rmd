@@ -12,6 +12,7 @@ library(ggfortify)
 library(RColorBrewer)
 library(sva)
 library(CEMiTool)
+library(viridis)
 ```
 
 ```{r Load files}
@@ -84,6 +85,8 @@ pheno <- pheno.arbo %>%
   mutate(condition = as.factor(condition)) %>% 
   mutate(dataset = as.factor(dataset))
 
+write_tsv(pheno, here("data", "Arbobios_CSBL_CHIKV_phenodata.tsv"))
+
 rawcount <- counts_arbo %>% 
   full_join(counts_csbl, by = "Symbol") %>% 
   relocate(Symbol, pheno$Run)
@@ -95,7 +98,7 @@ expr <- DGEList(counts = rawcount[,-1],
                 group = paste(pheno$condition, pheno$phase, 
                               pheno$disease.status, sep = "_"))
 
-expr.nrom <- calcNormFactors(expr, method = "TMM")
+expr.norm <- calcNormFactors(expr, method = "TMM")
 
 tmm.counts <- cpm(expr.norm, log = F)
 cpm.counts <- cpm(expr, log = F)
@@ -135,8 +138,6 @@ ggsave(here("results","figures","PCA_Arbobios_CSBL_dataset.png"), pca,
 df <- as.matrix(rawcount[,-1])
 rownames(df) <- rawcount$Symbol
 
-phase <- ifelse(is.na(pheno$phase) == T, 'healthy', pheno$phase)
-
 adj.count <- ComBat_seq(df, batch = pheno$dataset, group = pheno$condition)
 
 ## x
@@ -145,14 +146,26 @@ expr.adj <- DGEList(counts = adj.count,
                     group = paste(pheno$condition, pheno$phase, 
                                   pheno$disease.status, sep = "_"))
 
-expr.adj.nrom <- calcNormFactors(expr.adj, method = "TMM")
+expr.adj.norm <- calcNormFactors(expr.adj, method = "TMM")
 
 tmm.counts.adj <- cpm(expr.adj.norm, log = F)
+
+out.tmm.counts.adj <- tmm.counts.adj %>% 
+  as.data.frame() %>% 
+  rownames_to_column("gene_id") %>% 
+  full_join(hannot %>% select('gene_id', "GeneSymbol", "Class")) %>% 
+  relocate('gene_id', "GeneSymbol", "Class")
+
+#write_tsv(out.tmm.counts.adj, 
+#          here("data", "gene_expression",
+#               "counts_Arbobios_CSBL_NOTmultimapping_TMM_allGenes.tsv"))
+
 cpm.counts.adj <- cpm(expr.adj, log = F)
 
 # Select most variant genes
 genes.var.adj <- apply(tmm.counts.adj, 1, var)
-selectedGenes.adj <- names(genes.var[order(genes.var, decreasing = T)][1:500])
+selectedGenes.adj <- names(genes.var.adj[order(genes.var.adj, 
+                                               decreasing = T)][1:500])
 
 M.adj <- log2(t(tmm.counts.adj[selectedGenes.adj,]) + 1)
 
@@ -179,59 +192,4 @@ ggsave(here("results", "figures",
             "PCA_Arbobios_CSBL_dataset_Combatseq_adjusted_chronicity.png"), 
        pca.adj.chron, device = "png", width = 10, height = 6, units = "cm", 
        dpi = "print", scale = 2)
-
-```
-
-```{r CEMiToll}
-smpl.annot <- annot %>%
-  rownames_to_column("SampleName") %>% 
-  select(SampleName, Class = phase)
-
-tmm.counts.adj.hgnc <- tmm.counts.adj %>% 
-  as.data.frame() %>% 
-  rownames_to_column("gene_id") %>% 
-  inner_join(hannot %>% dplyr::select(gene_id, GeneSymbol)) %>% 
-  filter(!duplicated(GeneSymbol)) %>% 
-  dplyr::select(-gene_id) %>% 
-  column_to_rownames("GeneSymbol")
-
-cpm.counts.adj.hgnc <- cpm.counts.adj %>% 
-  as.data.frame() %>% 
-  rownames_to_column("gene_id") %>% 
-  inner_join(hannot %>% dplyr::select(gene_id, GeneSymbol)) %>% 
-  filter(!duplicated(GeneSymbol)) %>% 
-  dplyr::select(-gene_id) %>% 
-  column_to_rownames("GeneSymbol")
-
-cem.reactome.tmm <- cemitool(expr = tmm.counts.adj.hgnc, 
-                         annot = smpl.annot, apply_vst = T,
-                         gmt = gmt.reactn, interactions = int_df, 
-                         gsea_max_size = 2e3, verbose = TRUE)
-
-cem.reactome.cpm <- cemitool(expr = cpm.counts.adj.hgnc, 
-                         annot = smpl.annot, apply_vst = T,
-                         gmt = gmt.reactn, interactions = int_df, 
-                         gsea_max_size = 2e3, verbose = TRUE)
-
-# TMM
-generate_report(cem.reactome.tmm, title = "CSBL_Arbobios_integration TMM",
-                directory = here("results", "CEMiTool", "Report",
-                                 "CSBL_Arbobios_integration_TMM"), force = T)
-diagnostic_report(cem.reactome.tmm, title = "CSBL_Arbobios_integration TMM",
-                  directory = here("results", "CEMiTool", "Diagnostic",
-                                   "CSBL_Arbobios_integration_TMM"), force = T)
-save_plots(cem.reactome.tmm, "all", 
-           directory = here("results", "CEMiTool", "Plots",
-                            "CSBL_Arbobios_integration TMM"), force = T)
-
-# CPM
-generate_report(cem.reactome.cpm, title = "CSBL_Arbobios_integration CPM",
-                directory = here("results", "CEMiTool", "Report",
-                                 "CSBL_Arbobios_integration_CPM"), force = T)
-diagnostic_report(cem.reactome.cpm, title = "CSBL_Arbobios_integration CPM",
-                  directory = here("results", "CEMiTool", "Diagnostic",
-                                   "CSBL_Arbobios_integration_CPM"), force = T)
-save_plots(cem.reactome.cpm, "all", 
-           directory = here("results", "CEMiTool", "Plots",
-                            "CSBL_Arbobios_integration CPM"), force = T)
 ```
