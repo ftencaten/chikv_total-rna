@@ -65,7 +65,33 @@ write.GMT(third_level_gmt, here("data", "reactome_data",
 ```
 
 ```{r Reactome tree structure}
-ff <- apply(as.data.frame(tln), 1, 
-            function(x) names(which(sort(shortest.paths(graph_hrel)[,x]) != Inf)))
+leaves <- which(degree(graph_hrel, v = V(graph_hrel), 
+                       mode = "out") == 0, useNames = T)
+
+root <- which(degree(graph_hrel, v = V(graph_hrel), 
+                     mode = "in") == 0, useNames = T)
+
+leaves.list <- list()
+for (i in 1:length(root)) {
+  node <- all_simple_paths(graph_hrel, from = root[i], to = leaves)
+  for (j in 1:length(node)) {
+    leaves.list[[rev(as_ids(node[[j]]))[1]]] <- as_ids(node[[j]])
+  }
+
+}
+
+reactome_df <- plyr::ldply(leaves.list, rbind)
+
+third_level <- reactome_df %>% 
+  dplyr::select("3") %>% 
+  na.omit() %>% 
+  unique() %>%
+  deframe
+
+df <- NULL
+for(k in third_level){
+  root_node <- leaves.list[grep(k, leaves.list)][[1]][1]
+  df <- rbind(df, data.frame(root = root_node, node = k))
+}
 ```
 

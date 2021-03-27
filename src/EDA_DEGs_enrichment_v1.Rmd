@@ -13,6 +13,8 @@ library(pheatmap)
 library(ggfortify)
 library(RColorBrewer)
 library(fgsea)
+library(patchwork)
+library(ggrepel)
 
 options(scipen=999)
 ```
@@ -455,7 +457,7 @@ patchw <- (chronVSctrl.D0_vp | chronVSctrl.D21_vp) /
 fp <- patchw + plot_annotation(tag_levels = 'A')
 
 ggsave(here("results","figures","volcanoPlot_all_comparisons_Notmulti.png"), fp, 
-       device = "png", width = 10, height = 6, units = "cm", 
+       device = "png", width = 8, height = 9, units = "cm", 
        dpi = "print", scale = 2.5)
 
 ###### Volcano plot function WITH label
@@ -520,16 +522,16 @@ chronVSctrl_vp_la <- volc_plot_la(chronVSctrl_t)
 
 ggsave(here("results","figures","volcanoPlot_chronVSctrl_Notmulti.png"),
        chronVSctrl_vp_la, 
-       device = "png", width = 10, height = 6, units = "cm", 
-       dpi = "print", scale = 2.5)
+       device = "png", width = 8, height = 9, units = "cm", 
+       dpi = "print", scale = 1.3)
 
 # D21VSD0
 D21VSD0_vp_la <- volc_plot_la(D21VSD0_t)
 
 ggsave(here("results","figures","volcanoPlot_D21VSD0_Notmulti.png"),
        D21VSD0_vp_la, 
-       device = "png", width = 10, height = 6, units = "cm", 
-       dpi = "print", scale = 2.5)
+       device = "png", width = 8, height = 9, units = "cm", 
+       dpi = "print", scale = 1.3)
 ```
 
 ```{r Gene set enrichment analysis - Not multimapping}
@@ -920,6 +922,7 @@ edger.output.multi %>%
 ```
 
 ```{r Plot individual genes for inspection}
+### TPM
 x <- outTPMnotmulti %>% 
   pivot_longer(-c('Symbol','GeneSymbol'), names_to = 'lib', 
                values_to = 'tpm') %>%
@@ -931,6 +934,44 @@ x %>%
   filter(GeneSymbol == "EIF1AY") %>% 
   ggplot(aes(ClassDay, log2(tpm+1))) +
   geom_boxplot()
+
+## TMM
+
+x.tmm <- tmm %>% 
+  as.data.frame() %>% 
+  rownames_to_column("gene_id") %>% 
+  inner_join(hannot[,1:2], by = "gene_id") %>% 
+  relocate("gene_id", "GeneSymbol") %>% 
+  pivot_longer(-c('gene_id','GeneSymbol'), names_to = 'lib', 
+               values_to = 'tmm') %>%
+  mutate(lib = as.double(lib)) %>% 
+  full_join(pheno, by = c('lib' = 'Sample')) %>% 
+  unite("ClassDay", Class:Day)
+
+rnf39 <- x.tmm %>% 
+  filter(GeneSymbol == "RNF39") %>% 
+  ggplot(aes(ClassDay, log2(tmm+1))) +
+  geom_boxplot(aes(fill = ClassDay)) +
+  scale_fill_discrete() +
+  theme_classic()
+
+ggsave(here("results","figures","RNF39.png"),
+       rnf39, 
+       device = "png", width = 9, height = 6, units = "cm", 
+       dpi = "print", scale = 1.5)
+
+cxcl10 <- x.tmm %>% 
+  filter(GeneSymbol == "CXCL10") %>% 
+  ggplot(aes(ClassDay, log2(tmm+1))) +
+  geom_boxplot(aes(fill = ClassDay)) +
+  scale_fill_discrete() +
+  theme_classic()
+
+ggsave(here("results","figures","CXCL10.png"),
+       cxcl10, 
+       device = "png", width = 9, height = 6, units = "cm", 
+       dpi = "print", scale = 1.5)
+
 ```
 
 ```{r Interferon/Interleukine plot}
