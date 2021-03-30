@@ -43,6 +43,9 @@ rawcount <- read_tsv(here("data", "geneCounts",
 
 gene_set <- gmtPathways(here("data", "reactome_data", 
                              "ReactomePathwaysLevel3_2021-03.gmt"))
+
+root_node <- read_tsv(here("data", "reactome_data", 
+                           "ReactomePathways_leave_root_third_level.tsv"))
 ```
 
 ```{r TMM normalization}
@@ -162,10 +165,10 @@ my.contrast <- makeContrasts(
   chronVSnonChron.D21 = groupChronic_D21 - groupnonChronic_D21,
   chronD0VSchronD21 = groupChronic_D0 - groupChronic_D21,
   nonChronD0VSnonChronD21 = groupnonChronic_D0 - groupnonChronic_D21,
-  chronVSnonChron = (groupChronic_D21 + groupChronic_D0) - (groupnonChronic_D21 +
-                                                              groupnonChronic_D0),
-  D0VSD21 = (groupChronic_D0 + groupnonChronic_D0) - (groupChronic_D21 + 
-                                                        groupnonChronic_D21),
+  chronVSnonChron = (groupChronic_D21 + groupChronic_D0)/2 - (groupnonChronic_D21 +
+                                                              groupnonChronic_D0)/2,
+  D0VSD21 = (groupChronic_D0 + groupnonChronic_D0)/2 - (groupChronic_D21 + 
+                                                        groupnonChronic_D21)/2,
   levels = design)
 
 chronVSnonChron.D0 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSnonChron.D0"])
@@ -197,6 +200,57 @@ colnames(meanTMM) <- c("gene_id", "GeneSymbol", "Class",
 #          here("results", "DEG_edgeR", 
 #               "meanTMM_by_group.tsv"))
 
+################## DEGs by Class
+group <- factor(pheno$Class)
+
+y <- DGEList(counts = rawcount[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 5)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+chronVSnonChron <- glmQLFTest(fit, contrast = c(1,-1))
+chronVSnonChron_t <- topTags(chronVSnonChron, n = NULL)$table
+
+################## DEGs by Day
+group <- factor(pheno$Day)
+
+y <- DGEList(counts = rawcount[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 5)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+D0VSD21 <- glmQLFTest(fit, contrast = c(1,-1))
+D0VSD21_t <- topTags(D0VSD21, n = NULL)$table
+
+############ Join
 edger.output <- meanTMM %>% 
   full_join(chronVSnonChron.D0_t, by = c("gene_id","GeneSymbol","Class")) %>% 
   full_join(chronVSnonChron.D21_t, by = c("gene_id","GeneSymbol","Class"), 
@@ -511,7 +565,11 @@ fgseaRes <- bind_rows("chronVSnonChron.D0" = fgseaRes_chronVSnonChron.D0,
                       "chronVSnonChron" = fgseaRes_chronVSnonChron,
                       "chronD0VSchronD21" = fgseaRes_chronD0VSchronD21,
                       "nonChronD0VSnonChronD21" = fgseaRes_nonChronD0VSnonChronD21,
-                      "D0VSD21" = fgseaRes_D0VSD21, .id = "compar")
+                      "D0VSD21" = fgseaRes_D0VSD21, .id = "compar") %>% 
+  left_join(root_node %>% 
+              dplyr::select(root_name, node_name), 
+            by = c("pathway" = "node_name")) %>% 
+  relocate(compar, pathway, root_name)
 
 custom_pal <- c("#053061", "#2166AC", "#4393C3", "#92C5DE",
                         "#D1E5F0", "#FFFFFF", "#FDDBC7", "#F4A582",
@@ -522,41 +580,56 @@ custom_pal <- colorRampPalette(custom_pal)(200)
 fgseaRes_phase <- fgseaRes %>% 
   filter(compar %in% c("D0VSD21","chronD0VSchronD21","nonChronD0VSnonChronD21")) %>% 
   group_by(pathway) %>% 
-  filter(any(padj < 0.0001)) %>% 
-  mutate(NES = ifelse(padj > 0.0001, 0, NES)) 
+  filter(any(padj < 0.000001)) %>% 
+  mutate(NES = ifelse(padj > 0.000001, 0, NES)) %>% 
+  na.omit()
 
 max_abs_nes <- max(abs(fgseaRes_phase$NES))
 
 fgseaRes_phase %>% 
-  ggplot(aes(compar, y=pathway, size=-log10(fgseaRes_phase$padj), fill=NES)) +
-  geom_point(color = "white", shape=21) +
+  ggplot(aes(compar, y=pathway, size=-log10(padj), fill=NES)) +
+  geom_point(color = 'white', shape=21) +
   scale_fill_gradientn(colours=custom_pal, space = "Lab",
-                       limits=c(-max_abs_nes, max_abs_nes)) +
-  scale_size(range=c(0,5), limits=c(0, NA)) +
-  guides(size="none") +
-  theme_minimal() +
-  theme(panel.grid.major = element_blank(), 
-        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1)) 
+                       limits=c(-max_abs_nes, max_abs_nes),
+                       ) +
+  facet_grid(rows = vars(root_name), scales = "free_y", space = "free_y",
+             switch = "y") +
+  guides(size = guide_legend(override.aes = list(fill = "black")))+
+  theme_bw() +
+  theme(panel.grid.major = element_line(linetype = "dashed"),
+        panel.spacing = unit(0, "lines"),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1),
+        strip.text.y.left = element_text(angle = 0),
+        strip.background =element_rect(fill=NA))
 
 # By Chronicity
 fgseaRes_chron <- fgseaRes %>% 
   filter(compar %in% c("chronVSnonChron","chronVSnonChron.D0","chronVSnonChron.D21")) %>% 
   group_by(pathway) %>% 
   filter(any(padj < 0.00001)) %>% 
-  mutate(NES = ifelse(padj > 0.00001, 0, NES)) 
+  mutate(NES = ifelse(padj > 0.00001, 0, NES))
+
+ 
+  na.omit()
 
 max_abs_nes <- max(abs(fgseaRes_chron$NES))
 
 fgseaRes_chron %>% 
   ggplot(aes(compar, y=pathway, size=-log10(padj), fill=NES)) +
-  geom_point(color = "white", shape=21) +
+  geom_point(color = 'white', shape=21) +
   scale_fill_gradientn(colours=custom_pal, space = "Lab",
-                       limits=c(-max_abs_nes, max_abs_nes)) +
-  scale_size(range=c(0,5), limits=c(0, NA)) +
-  guides(size="none") +
-  theme_minimal() +
-  theme(panel.grid.major = element_blank(), 
-        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1)) 
+                       limits=c(-max_abs_nes, max_abs_nes),
+                       ) +
+  facet_grid(rows = vars(root_name), scales = "free_y", space = "free_y",
+             switch = "y") +
+  guides(size = guide_legend(override.aes = list(fill = "black")))+
+  theme_bw() +
+  theme(panel.grid.major = element_line(linetype = "dashed"),
+        panel.spacing = unit(0, "lines"),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1),
+        strip.text.y.left = element_text(angle = 0),
+        strip.background =element_rect(fill=NA)) 
+
 
 #ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES)) +
 #  geom_col(aes(fill=padj<0.05)) +
