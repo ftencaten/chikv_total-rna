@@ -1,0 +1,301 @@
+---
+title: "Data integration"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r Load libraries}
+library(here)
+library(tidyverse)
+library(edgeR)
+library(ggfortify)
+library(RColorBrewer)
+library(CEMiTool)
+library(viridis)
+library(fgsea)
+```
+
+```{r Load files}
+# Arbobios + CSBL phenodata
+pheno <- read_tsv(here("data", "Arbobios_CSBL_CHIKV_phenodata.tsv"))
+
+# Human genome annotation
+hannot <- read_tsv(here("data", 
+                        "Homo_sapiens.GRCh38.100_gene_annotation_table.txt"))
+
+# CSBL read count
+counts_csbl <- read_tsv(here("data", "chikv_csbl_star", "CountTable.tsv")) %>% 
+  dplyr::rename(Symbol = genes)
+
+gene_set <- gmtPathways(here("data", "reactome_data", 
+                            "ReactomePathwaysLevel3_2021-03.gmt"))
+
+int_df <- read_tsv(here("data", "interaction_DB", 
+                        "9606.gene.physical.links.STRINGv11_HGNC.tsv")) %>% 
+  as.data.frame()
+
+root_node <- read_tsv(here("data", "reactome_data", 
+                           "ReactomePathways_leave_root_third_level.tsv"))
+
+```
+
+```{r DEGs CSBL}
+annot <- pheno %>% 
+  dplyr::select(Run, condition, phase, dataset, disease.status) %>% 
+  mutate(phase = ifelse(is.na(phase) == T, "healthy", phase)) %>% 
+  mutate(disease.status = case_when(phase == "healthy" ~ "healthy", 
+                                    phase != 'healthy' &
+                                    is.na(disease.status) ~ 'unknown',
+                                    TRUE ~ disease.status)) %>% 
+  column_to_rownames('Run')
+
+csbl.annot <- annot %>% 
+  filter(dataset == "csbl") %>% 
+  mutate(group = ifelse(condition == "healthy", "healthy", 
+                        paste(condition, phase, disease.status, sep = '_'))) %>% 
+  rownames_to_column("Run")
+
+counts_csbl_ord <- counts_csbl %>% 
+  dplyr::select(Symbol, csbl.annot$Run)
+
+####### Phase comparison - Early VS Healthy
+groups <- as.factor(csbl.annot$phase)
+
+csbl.expr <- DGEList(counts = counts_csbl_ord[,-1], 
+                     genes = hannot[,1:3],
+                     group = groups)
+
+design <- model.matrix(~groups+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(csbl.expr, min.count = 5)
+csbl.expr <- csbl.expr[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+csbl.expr <- calcNormFactors(csbl.expr, method = "TMM")
+
+# Estimate Dispersion
+csbl.expr <- estimateDisp(csbl.expr, design)
+
+#DE
+fit <- glmQLFit(csbl.expr, design)
+
+my.contrast <- makeContrasts(earlyVShealthy = groupsearly - groupshealthy,
+                            levels = design)
+
+earlyVShealthy <- glmQLFTest(fit, contrast = my.contrast[, "earlyVShealthy"])
+
+
+earlyVShealthy_t <- topTags(earlyVShealthy, n = NULL)$table
+
+####### Chronicity comparison - Early Chronic VS Ealry Non-chronic
+groups <- as.factor(csbl.annot$group)
+
+csbl.expr <- DGEList(counts = counts_csbl_ord[,-1], 
+                     genes = hannot[,1:3],
+                     group = groups)
+
+design <- model.matrix(~groups+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(csbl.expr, min.count = 5)
+csbl.expr <- csbl.expr[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+csbl.expr <- calcNormFactors(csbl.expr, method = "TMM")
+
+# Estimate Dispersion
+csbl.expr <- estimateDisp(csbl.expr, design)
+
+#DE
+fit <- glmQLFit(csbl.expr, design)
+
+my.contrast <- makeContrasts(
+  chronicVSnonChronic.early = groupsinfected_early_chronic - 
+                              groupsinfected_early_nonChronic,
+  levels = design)
+
+chronVSnonChron.early <- glmQLFTest(fit, contrast = my.contrast[, "chronicVSnonChronic.early"])
+
+chronVSnonChron.early_t <- topTags(chronVSnonChron.early, n = NULL)$table
+
+
+### DEGs number
+# Chron vs Non-Chron
+chronVSnonChron.early_t %>% 
+  filter(logFC >= 1, FDR < 0.1) %>% nrow()
+chronVSnonChron.early_t %>% 
+  filter(logFC <= -1, FDR < 0.1) %>% nrow()
+
+# Early vs Late
+earlyVShealthy_t %>% 
+   filter(logFC >= 1, FDR < 0.01) %>% nrow()
+earlyVShealthy_t %>% 
+  filter(logFC <= -1, FDR < 0.01) %>% nrow()
+```
+
+```{r FGSEA}
+# chronVSnonChron.D0
+ranks_earlyVShealthy <- earlyVShealthy_t %>% 
+  mutate(rank = logFC) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_earlyVShealthy <- fgsea(pathways=gene_set,
+                                 stats=ranks_earlyVShealthy, eps=0)
+
+# chronVSnonChron.D21
+ranks_chronVSnonChron.early <- chronVSnonChron.early_t %>% 
+  mutate(rank = logFC) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_chronVSnonChron.early <- fgsea(pathways=gene_set, 
+                                        stats=ranks_chronVSnonChron.early, eps=0)
+
+
+# Join fgsea results
+fgseaRes <- bind_rows("earlyVShealthy" = fgseaRes_earlyVShealthy, 
+                      "chronVSnonChron.early" = fgseaRes_chronVSnonChron.early,
+                      .id = "compar") %>% 
+  left_join(root_node %>% 
+              dplyr::select(root_name, node_name), 
+            by = c("pathway" = "node_name")) %>% 
+  relocate(compar, pathway, root_name)
+
+
+custom_pal <- c("#053061", "#2166AC", "#4393C3", "#92C5DE",
+                        "#D1E5F0", "#FFFFFF", "#FDDBC7", "#F4A582",
+                        "#D6604D", "#B2182B", "#67001F")
+custom_pal <- colorRampPalette(custom_pal)(200)
+
+# By phase
+fgseaRes_phase <- fgseaRes %>% 
+  group_by(pathway) %>% 
+  filter(any(padj < 0.01)) %>% 
+  mutate(NES = ifelse(padj > 0.01, 0, NES)) %>% 
+  na.omit()
+
+max_abs_nes <- max(abs(fgseaRes_phase$NES))
+
+fgseaRes_phase %>% 
+  ggplot(aes(compar, y=pathway, size=-log10(fgseaRes_phase$padj), fill=NES)) +
+  geom_point(color = "white", shape=21) +
+  scale_fill_gradientn(colours=custom_pal, space = "Lab",
+                       limits=c(-max_abs_nes, max_abs_nes)) +
+  scale_size(range=c(0,5), limits=c(0, NA)) +
+  guides(size="none") +
+  facet_grid(rows = vars(root_name), scales = "free_y", space = "free_y",
+             switch = "y")+
+  theme_bw() +
+  theme(panel.grid.major = element_line(linetype = "dashed"),
+        panel.spacing = unit(0, "lines"),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1),
+        strip.text.y.left = element_text(angle = 0),
+        strip.background =element_rect(fill=NA))
+
+#ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES)) +
+#  geom_col(aes(fill=padj<0.05)) +
+#  coord_flip() +
+#  labs(x="Pathway", y="Normalized Enrichment Score",
+#       title="Hallmark pathways NES from GSEA") + 
+#  theme_minimal()
+
+#plotEnrichment(pathways.hallmark[[head(fgseaRes[order(pval), ], 1)$pathway]],
+#               ranks) + labs(title=head(fgseaRes[order(pval), ], 1)$pathway)
+```
+
+
+```{r GSEA Heatmap}
+pcut = 0.05
+
+nes <- stat
+
+nes <- nes[rowSums(nes > -log10(pcut) | nes < -log10(pcut) *-1) >= 1, , drop=FALSE]
+
+custom_pal <- c("#053061", "#2166AC", "#4393C3", "#92C5DE",
+                "#D1E5F0", "#FFFFFF", "#FDDBC7", "#F4A582",
+                "#D6604D", "#B2182B", "#67001F")
+
+custom_pal <- colorRampPalette(custom_pal)(200)
+
+nes <- as.matrix(nes)
+
+nes[which(nes < -log10(pcut) & nes > -log10(pcut)*-1, arr.ind=TRUE)] <- 0
+
+#if(nrow(nes) > 2){
+#  row_order <- rownames(nes)[hclust(dist(nes))$order]
+#} else {
+#  row_order <- rownames(nes)
+#}
+
+nes_melted <- reshape2::melt(nes)
+colnames(nes_melted) <- c("Pathway", "Class", "stat")
+
+nes_melted$Pathway <- factor(nes_melted$Pathway)
+nes_melted$Class <- factor(nes_melted$Class, 
+                           levels = c("chronVSctrl.D0", "chronVSctrl.D21", "chronVSctrl",
+                                      "chronD21VSchronD0", "ctrlD21VSctrlD0", "D21VSD0"))
+
+max_abs_nes <- max(abs(nes_melted$stat))
+        
+res <- ggplot(nes_melted, aes_(x=~Class, y=~Pathway, size=~abs(stat), fill=~stat)) +
+  geom_point(color = "white", shape=21) +
+  scale_fill_gradientn(colours=custom_pal, space = "Lab",
+                       limits=c(-max_abs_nes, max_abs_nes)) +
+  scale_size(range=c(0,5), limits=c(0, NA)) +
+  guides(size="none") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank(), 
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1)) 
+
+
+ggsave(here("results","figures","enrichPlot_DEGS_NotMulti.png"), res, 
+       device = "png", width = 9, height = 6.5, units = "cm", 
+       dpi = "print", scale = 2)
+
+
+############## FGSEA
+
+pcut = 0.0001
+
+padj <- padj[rowSums(padj < pcut) >= 1, , drop=FALSE]
+nes <- nes[rownames(padj), , drop=FALSE]
+
+custom_pal <- c("#053061", "#2166AC", "#4393C3", "#92C5DE",
+                "#D1E5F0", "#FFFFFF", "#FDDBC7", "#F4A582",
+                "#D6604D", "#B2182B", "#67001F")
+
+custom_pal <- colorRampPalette(custom_pal)(200)
+
+nes <- as.matrix(nes)
+padj <- as.matrix(padj)
+nes[which(padj > pcut, arr.ind=TRUE)] <- 0
+
+if(nrow(nes) > 2){
+  row_order <- rownames(nes)[hclust(dist(nes))$order]
+} else {
+  row_order <- rownames(nes)
+}
+
+nes_melted <- reshape2::melt(nes)
+colnames(nes_melted) <- c("Module", "Class", "NES")
+nes_melted$Module <- factor(nes_melted$Module, levels=row_order)
+nes_melted$Class <- as.character(nes_melted$Class)
+max_abs_nes <- max(abs(nes_melted$NES))
+        
+ggplot(nes_melted, aes_(x=~Class, y=~Module, size=~abs(NES), fill=~NES)) +
+  geom_point(color = "white", shape=21) +
+  scale_fill_gradientn(colours=custom_pal, space = "Lab",
+                       limits=c(-max_abs_nes, max_abs_nes)) +
+  scale_size(range=c(0,5), limits=c(0, NA)) +
+  guides(size="none") +
+  theme_minimal() +
+  theme(panel.grid.major = element_blank()) 
+
+```
+
