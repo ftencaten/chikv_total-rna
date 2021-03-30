@@ -65,6 +65,13 @@ write.GMT(third_level_gmt, here("data", "reactome_data",
 ```
 
 ```{r Reactome tree structure}
+hrel <- hch %>% 
+  filter(grepl("HSA", X1))%>% 
+  dplyr::rename(source = "X1", target = "X2")
+
+# Calculate hierarchy level with graph.data.frame function from igraph pkg
+graph_hrel <- graph.data.frame(hrel)
+
 leaves <- which(degree(graph_hrel, v = V(graph_hrel), 
                        mode = "out") == 0, useNames = T)
 
@@ -88,10 +95,30 @@ third_level <- reactome_df %>%
   unique() %>%
   deframe
 
+# GMT Objet
+third_level_gmt <- Filter(function(term) term$name %in% third_level, react.gmt)
+
+write.GMT(third_level_gmt, here("data", "reactome_data",
+                                "ReactomePathwaysLevel3_2021-03.gmt"))
+
 df <- NULL
 for(k in third_level){
   root_node <- leaves.list[grep(k, leaves.list)][[1]][1]
   df <- rbind(df, data.frame(root = root_node, node = k))
 }
+
+out.df <- df %>%
+  left_join(reactome_all %>% 
+              select(X2, X4) %>% 
+              unique(), by =c('root' = 'X2')) %>% 
+  rename('root_name' = X4) %>% 
+  left_join(reactome_all %>% 
+              select(X2, X4) %>% 
+              unique(), by =c('node' = 'X2')) %>% 
+  rename('node_name' = X4) %>% 
+  relocate(root, root_name, node, node_name)
+
+#write_tsv(out.df, here("data", "reactome_data", 
+#                       "ReactomePathways_leave_root_third_level.tsv"))
 ```
 
