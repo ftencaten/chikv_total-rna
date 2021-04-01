@@ -1,0 +1,545 @@
+---
+title: "RNA-seq analysis - CHIKV infection"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r Load libraries}
+library(here)
+library(tidyverse)
+library(edgeR)
+
+options(scipen=999)
+```
+
+```{r Load files}
+# Human genome annotation
+hannot <- read_tsv(here("data", 
+                        "Homo_sapiens.GRCh38.100_gene_annotation_table.txt"))
+
+# Phenodata
+pheno <- read_tsv(here("data", "Arbobios_CSBL_CHIKV_phenodata.tsv"))
+
+# CSBL read count Raw
+raw_csbl <- read_tsv(here("data", "chikv_csbl_star", "CountTable.tsv")) %>% 
+  dplyr::rename(Symbol = genes)
+
+# Arbobios read count Raw
+raw_arbobios <- read_tsv(here("data", "geneCounts",
+                          "rawCounts_featureCounts_NOTmultimapping.tsv")) %>%
+  rename_with(~ sub(".Aligned.sortedByCoord.out.bam", "", .x), 
+              ends_with("bam")) %>% 
+  rename_with(~ sub("19017", "", .x), everything()) %>% 
+  rename_with(~ sub("^", "ARB", .x), -Symbol) %>%
+  rename_with(~ sub("Aligned.out.bam", "", .x), everything()) %>% 
+  dplyr::select("Symbol", sort(colnames(.)))
+
+# Read count adjusted by Combat-seq
+adj.counts <- read_tsv(here("data", "gene_expression",
+                            "Arbobios_CSBL_rawCounts_CombatAdjusted.tsv"))
+
+```
+
+```{r DE Arbobios original}
+pheno_arb <- pheno %>% 
+  filter(dataset == "arbobios")
+
+group <- factor(paste(pheno_arb$phase, pheno_arb$disease.status, sep = "_"))
+
+y <- DGEList(counts = raw_arbobios[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 1)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate Dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+my.contrast <- makeContrasts(
+  chronVSnonChron.D0 = groupearly_chronic - groupearly_nonChronic,
+  chronVSnonChron.D21 = grouplate_chronic - grouplate_nonChronic,
+  chronD0VSchronD21 = groupearly_chronic - grouplate_chronic,
+  nonChronD0VSnonChronD21 = groupearly_nonChronic - grouplate_nonChronic,
+  levels = design)
+
+chronVSnonChron.D0 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSnonChron.D0"])
+chronVSnonChron.D21 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSnonChron.D21"])
+chronD0VSchronD21 <- glmQLFTest(fit, contrast = my.contrast[, "chronD0VSchronD21"])
+nonChronD0VSnonChronD21 <- glmQLFTest(fit, 
+                                      contrast = my.contrast[, "nonChronD0VSnonChronD21"])
+
+chronVSnonChron.D0_t <- topTags(chronVSnonChron.D0, n = NULL)$table
+chronVSnonChron.D21_t <- topTags(chronVSnonChron.D21, n = NULL)$table
+chronD0VSchronD21_t <- topTags(chronD0VSchronD21, n = NULL)$table
+nonChronD0VSnonChronD21_t <- topTags(nonChronD0VSnonChronD21, n = NULL)$table
+
+################## DEGs by Class
+group <- factor(pheno_arb$disease.status)
+
+y <- DGEList(counts = raw_arbobios[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 1)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+chronVSnonChron <- glmQLFTest(fit, contrast = c(1,-1))
+chronVSnonChron_t <- topTags(chronVSnonChron, n = NULL)$table
+
+################## DEGs by Day
+group <- factor(pheno_arb$phase)
+
+y <- DGEList(counts = raw_arbobios[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 1)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+D0VSD21 <- glmQLFTest(fit, contrast = c(1,-1))
+D0VSD21_t <- topTags(D0VSD21, n = NULL)$table
+
+edgeR.arb_original <- bind_rows("chronVSnonChron.D0" = chronVSnonChron.D0_t,
+                       "chronVSnonChron.D21" = chronVSnonChron.D21_t,
+                       "chronD0VSchronD21" = chronD0VSchronD21_t,
+                       "nonChronD0VSnonChronD21" = nonChronD0VSnonChronD21_t,
+                       "chronVSnonChron" = chronVSnonChron_t,
+                       "D0VSD21" = D0VSD21_t,
+                      .id = "compar")
+
+write_tsv(edgeR.arb_original, 
+          here("results", "DEG_edgeR", 
+               "arbobios_phase_condition_original.tsv"))
+
+fc.up = 1
+fc.dw = -1
+stat = 0.1
+
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron.D0") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron.D0") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow()  
+
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron.D21") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron.D21") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow() 
+
+edgeR.arb_original %>%
+  filter(compar == "chronD0VSchronD21") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "chronD0VSchronD21") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow()
+
+edgeR.arb_original %>%
+  filter(compar == "nonChronD0VSnonChronD21") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "nonChronD0VSnonChronD21") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow()
+
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow()
+
+edgeR.arb_original %>%
+  filter(compar == "D0VSD21") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "D0VSD21") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow()
+```
+
+```{r CSBL original}
+annot <- pheno %>% 
+  dplyr::select(Run, condition, phase, dataset, disease.status) %>% 
+  mutate(phase = ifelse(is.na(phase) == T, "healthy", phase)) %>% 
+  mutate(disease.status = case_when(phase == "healthy" ~ "healthy", 
+                                    phase != 'healthy' &
+                                    is.na(disease.status) ~ 'unknown',
+                                    TRUE ~ disease.status)) %>% 
+  column_to_rownames('Run')
+
+csbl.annot <- annot %>% 
+  filter(dataset == "csbl") %>% 
+  mutate(group = ifelse(condition == "healthy", "healthy", 
+                        paste(condition, phase, disease.status, sep = '_'))) %>% 
+  rownames_to_column("Run")
+
+####### Phase comparison - Early VS Healthy
+groups <- as.factor(csbl.annot$phase)
+
+counts_csbl_ord <- raw_csbl %>% 
+  dplyr::select(Symbol, csbl.annot$Run)
+
+csbl.expr <- DGEList(counts = counts_csbl_ord[,-1], 
+                     genes = hannot[,c(1,2,4)],
+                     group = groups)
+
+design <- model.matrix(~groups+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(csbl.expr, min.count = 1)
+csbl.expr <- csbl.expr[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+csbl.expr <- calcNormFactors(csbl.expr, method = "TMM")
+
+# Estimate Dispersion
+csbl.expr <- estimateDisp(csbl.expr, design)
+
+#DE
+fit <- glmQLFit(csbl.expr, design)
+
+my.contrast <- makeContrasts(earlyVShealthy = groupsearly - groupshealthy,
+                            levels = design)
+
+earlyVShealthy <- glmQLFTest(fit, contrast = my.contrast[, "earlyVShealthy"])
+
+earlyVShealthy_t <- topTags(earlyVShealthy, n = NULL)$table
+
+####### Chronicity comparison - Early Chronic VS Early Non-chronic
+groups <- as.factor(csbl.annot$group)
+
+csbl.expr <- DGEList(counts = counts_csbl_ord[,-1], 
+                     genes = hannot[,c(1,2,4)],
+                     group = groups)
+
+design <- model.matrix(~groups+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(csbl.expr, min.count = 1)
+csbl.expr <- csbl.expr[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+csbl.expr <- calcNormFactors(csbl.expr, method = "TMM")
+
+# Estimate Dispersion
+csbl.expr <- estimateDisp(csbl.expr, design)
+
+#DE
+fit <- glmQLFit(csbl.expr, design)
+
+my.contrast <- makeContrasts(
+  chronicVSnonChronic.early = groupsinfected_early_chronic - 
+                              groupsinfected_early_nonChronic,
+  levels = design)
+
+chronVSnonChron.early <- glmQLFTest(fit, contrast = my.contrast[, "chronicVSnonChronic.early"])
+
+chronVSnonChron.early_t <- topTags(chronVSnonChron.early, n = NULL)$table
+
+### DEGs number
+# Chron vs Non-Chron
+chronVSnonChron.early_t %>% 
+  filter(logFC >= 1, FDR < 0.1) %>% nrow()
+chronVSnonChron.early_t %>% 
+  filter(logFC <= -1, FDR < 0.1) %>% nrow()
+
+# Early vs Late
+earlyVShealthy_t %>% 
+   filter(logFC >= 1, FDR < 0.1) %>% nrow()
+earlyVShealthy_t %>% 
+  filter(logFC <= -1, FDR < 0.1) %>% nrow()
+
+edgeR.out <- bind_rows("earlyVShealthy" = earlyVShealthy_t, 
+                      "chronVSnonChron.early" = chronVSnonChron.early_t,
+                      .id = "compar")
+
+#write_tsv(edgeR.out, here("results", "DEG_edgeR", "csbl_phase_condition.tsv"))
+```
+
+```{r DE Arbobios adjusted}
+pheno_arb <- pheno %>% 
+  filter(dataset == "arbobios")
+
+group <- factor(paste(pheno_arb$phase, pheno_arb$disease.status, sep = "_"))
+
+raw_arbobios <- adj.counts %>% 
+  dplyr::select(Symbol = gene_id, pheno_arb$Run)
+
+y <- DGEList(counts = raw_arbobios[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 5)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate Dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+my.contrast <- makeContrasts(
+  chronVSnonChron.D0 = groupearly_chronic - groupearly_nonChronic,
+  chronVSnonChron.D21 = grouplate_chronic - grouplate_nonChronic,
+  chronD0VSchronD21 = groupearly_chronic - grouplate_chronic,
+  nonChronD0VSnonChronD21 = groupearly_nonChronic - grouplate_nonChronic,
+  levels = design)
+
+chronVSnonChron.D0 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSnonChron.D0"])
+chronVSnonChron.D21 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSnonChron.D21"])
+chronD0VSchronD21 <- glmQLFTest(fit, contrast = my.contrast[, "chronD0VSchronD21"])
+nonChronD0VSnonChronD21 <- glmQLFTest(fit, 
+                                      contrast = my.contrast[, "nonChronD0VSnonChronD21"])
+
+chronVSnonChron.D0_t <- topTags(chronVSnonChron.D0, n = NULL)$table
+chronVSnonChron.D21_t <- topTags(chronVSnonChron.D21, n = NULL)$table
+chronD0VSchronD21_t <- topTags(chronD0VSchronD21, n = NULL)$table
+nonChronD0VSnonChronD21_t <- topTags(nonChronD0VSnonChronD21, n = NULL)$table
+
+################## DEGs by Class
+group <- factor(pheno_arb$disease.status)
+
+y <- DGEList(counts = raw_arbobios[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 5)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+chronVSnonChron <- glmQLFTest(fit, contrast = c(1,-1))
+chronVSnonChron_t <- topTags(chronVSnonChron, n = NULL)$table
+
+################## DEGs by Day
+group <- factor(pheno_arb$phase)
+
+y <- DGEList(counts = raw_arbobios[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 5)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+D0VSD21 <- glmQLFTest(fit, contrast = c(1,-1))
+D0VSD21_t <- topTags(D0VSD21, n = NULL)$table
+
+edgeR.arb_original <- bind_rows("chronVSnonChron.D0" = chronVSnonChron.D0_t,
+                       "chronVSnonChron.D21" = chronVSnonChron.D21_t,
+                       "chronD0VSchronD21" = chronD0VSchronD21_t,
+                       "nonChronD0VSnonChronD21" = nonChronD0VSnonChronD21_t,
+                       "chronVSnonChron" = chronVSnonChron_t,
+                       "D0VSD21" = D0VSD21_t,
+                      .id = "compar")
+
+#write_tsv(edgeR.arb_original, 
+#          here("results", "DEG_edgeR", 
+#               "arbobios_phase_condition_original.tsv"))
+
+fc.up = 1
+fc.dw = -1
+stat = 0.05
+
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron.D0") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron.D0") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow()  
+
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron.D21") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron.D21") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow() 
+
+edgeR.arb_original %>%
+  filter(compar == "chronD0VSchronD21") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "chronD0VSchronD21") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow()
+
+edgeR.arb_original %>%
+  filter(compar == "nonChronD0VSnonChronD21") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "nonChronD0VSnonChronD21") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow()
+
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "chronVSnonChron") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow()
+
+edgeR.arb_original %>%
+  filter(compar == "D0VSD21") %>% 
+  filter(logFC > fc.up & FDR < stat) %>% nrow()
+edgeR.arb_original %>%
+  filter(compar == "D0VSD21") %>% 
+  filter(logFC < fc.dw & FDR < stat) %>% nrow()
+```
+
+```{r CSBL adjusted}
+annot <- pheno %>% 
+  dplyr::select(Run, condition, phase, dataset, disease.status) %>% 
+  mutate(phase = ifelse(is.na(phase) == T, "healthy", phase)) %>% 
+  mutate(disease.status = case_when(phase == "healthy" ~ "healthy", 
+                                    phase != 'healthy' &
+                                    is.na(disease.status) ~ 'unknown',
+                                    TRUE ~ disease.status)) %>% 
+  column_to_rownames('Run')
+
+csbl.annot <- annot %>% 
+  filter(dataset == "csbl") %>% 
+  mutate(group = ifelse(condition == "healthy", "healthy", 
+                        paste(condition, phase, disease.status, sep = '_'))) %>% 
+  rownames_to_column("Run")
+
+####### Phase comparison - Early VS Healthy
+groups <- as.factor(csbl.annot$phase)
+
+counts_csbl_ord <- adj.counts %>% 
+  dplyr::select(Symbol = gene_id, csbl.annot$Run)
+
+csbl.expr <- DGEList(counts = counts_csbl_ord[,-1], 
+                     genes = hannot[,c(1,2,4)],
+                     group = groups)
+
+design <- model.matrix(~groups+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(csbl.expr, min.count = 5)
+csbl.expr <- csbl.expr[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+csbl.expr <- calcNormFactors(csbl.expr, method = "TMM")
+
+# Estimate Dispersion
+csbl.expr <- estimateDisp(csbl.expr, design)
+
+#DE
+fit <- glmQLFit(csbl.expr, design)
+
+my.contrast <- makeContrasts(earlyVShealthy = groupsearly - groupshealthy,
+                            levels = design)
+
+earlyVShealthy <- glmQLFTest(fit, contrast = my.contrast[, "earlyVShealthy"])
+
+earlyVShealthy_t <- topTags(earlyVShealthy, n = NULL)$table
+
+####### Chronicity comparison - Early Chronic VS Early Non-chronic
+groups <- as.factor(csbl.annot$group)
+
+csbl.expr <- DGEList(counts = counts_csbl_ord[,-1], 
+                     genes = hannot[,c(1,2,4)],
+                     group = groups)
+
+design <- model.matrix(~groups+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(csbl.expr, min.count = 5)
+csbl.expr <- csbl.expr[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+csbl.expr <- calcNormFactors(csbl.expr, method = "TMM")
+
+# Estimate Dispersion
+csbl.expr <- estimateDisp(csbl.expr, design)
+
+#DE
+fit <- glmQLFit(csbl.expr, design)
+
+my.contrast <- makeContrasts(
+  chronicVSnonChronic.early = groupsinfected_early_chronic - 
+                              groupsinfected_early_nonChronic,
+  levels = design)
+
+chronVSnonChron.early <- glmQLFTest(fit, contrast = my.contrast[, "chronicVSnonChronic.early"])
+
+chronVSnonChron.early_t <- topTags(chronVSnonChron.early, n = NULL)$table
+
+### DEGs number
+# Chron vs Non-Chron
+chronVSnonChron.early_t %>% 
+  filter(logFC >= 1, FDR < 0.05) %>% nrow()
+chronVSnonChron.early_t %>% 
+  filter(logFC <= -1, FDR < 0.05) %>% nrow()
+
+# Early vs Late
+earlyVShealthy_t %>% 
+   filter(logFC >= 1, FDR < 0.05) %>% nrow()
+earlyVShealthy_t %>% 
+  filter(logFC <= -1, FDR < 0.05) %>% nrow()
+
+edgeR.out <- bind_rows("earlyVShealthy" = earlyVShealthy_t, 
+                      "chronVSnonChron.early" = chronVSnonChron.early_t,
+                      .id = "compar")
+```
+

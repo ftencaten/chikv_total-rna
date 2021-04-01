@@ -30,7 +30,7 @@ hannot <- read_tsv(here("data",
 
 # CSBL read count
 counts_csbl <- read_tsv(here("data", "chikv_csbl_star", "CountTable.tsv")) %>% 
-  rename(Symbol = genes)
+  dplyr::rename(Symbol = genes)
 
 # Arbobobios read count
 counts_arbo <- read_tsv(here("data", "geneCounts",
@@ -68,7 +68,7 @@ pheno.csbl <- sra.csbl %>%
                              Arthralgia_Chronicity == "N" ~ "nonChronic"))
 
 pheno <- pheno.arbo %>%
-  rename(Run = Sample, day = Day) %>% 
+  dplyr::rename(Run = Sample, day = Day) %>% 
   mutate(disease.status = ifelse(Class == "control", "nonChronic", Class)) %>% 
   mutate(condition = "infected") %>% 
   dplyr::select(-Class, - Batch) %>%
@@ -133,9 +133,9 @@ pca <- autoplot(pcaResults, data = as.data.frame(annot),
   scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
   theme_bw()
 
-ggsave(here("results","figures","PCA_Arbobios_CSBL_dataset.png"), pca, 
-       device = "png", width = 10, height = 6, units = "cm", 
-       dpi = "print", scale = 2)
+#ggsave(here("results","figures","PCA_Arbobios_CSBL_dataset.png"), pca, 
+#       device = "png", width = 10, height = 6, units = "cm", 
+#       dpi = "print", scale = 2)
 ```
 
 ```{r Combat-seq}
@@ -190,20 +190,21 @@ pca.adj <- autoplot(pcaResults.adj, data = as.data.frame(annot),
   scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
   theme_bw()
 
-ggsave(here("results", "figures",
-            "PCA_Arbobios_CSBL_dataset_Combatseq_adjusted.png"), 
-       pca.adj, device = "png", width = 10, height = 6, units = "cm", 
-       dpi = "print", scale = 2)
+#ggsave(here("results", "figures",
+#            "PCA_Arbobios_CSBL_dataset_Combatseq_adjusted.png"), 
+#       pca.adj, device = "png", width = 10, height = 6, units = "cm", 
+#       dpi = "print", scale = 2)
 
-pca.adj.chron <- autoplot(pcaResults.adj, data = as.data.frame(annot), 
-                          colour = "disease.status", shape = "phase",
+pca.adj.chron 
+autoplot(pcaResults.adj, data = as.data.frame(annot), 
+                          colour = "disease.status", shape = "phase", alpha = "dataset",
                           main = "CHIKV Chronicity - Batch correction") +
   scale_colour_viridis(discrete = T) +
   theme_bw()
 
-ggsave(here("results", "figures",
-            "PCA_Arbobios_CSBL_dataset_Combatseq_adjusted_chronicity.png"), 
-       pca.adj.chron, device = "png", width = 10, height = 6, units = "cm", 
-       dpi = "print", scale = 2)
+#ggsave(here("results", "figures",
+#            "PCA_Arbobios_CSBL_dataset_Combatseq_adjusted_chronicity.png"), 
+#       pca.adj.chron, device = "png", width = 10, height = 6, units = "cm", 
+#       dpi = "print", scale = 2)
 ```
 

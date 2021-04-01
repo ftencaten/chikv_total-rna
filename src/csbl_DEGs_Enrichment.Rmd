@@ -37,6 +37,9 @@ int_df <- read_tsv(here("data", "interaction_DB",
 root_node <- read_tsv(here("data", "reactome_data", 
                            "ReactomePathways_leave_root_third_level.tsv"))
 
+adj.counts <- read_tsv(here("data", "gene_expression",
+                            "Arbobios_CSBL_rawCounts_CombatAdjusted.tsv"))
+
 ```
 
 ```{r DEGs CSBL}
@@ -55,14 +58,19 @@ csbl.annot <- annot %>%
                         paste(condition, phase, disease.status, sep = '_'))) %>% 
   rownames_to_column("Run")
 
-counts_csbl_ord <- counts_csbl %>% 
-  dplyr::select(Symbol, csbl.annot$Run)
+## Raw counts
+#counts_csbl_ord <- counts_csbl %>% 
+#  dplyr::select(Symbol, csbl.annot$Run)
+
+## Combat-seq adjusted counts
+counts_csbl_ord <- adj.counts %>% 
+  dplyr::select(Symbol = gene_id, csbl.annot$Run)
 
 ####### Phase comparison - Early VS Healthy
 groups <- as.factor(csbl.annot$phase)
 
 csbl.expr <- DGEList(counts = counts_csbl_ord[,-1], 
-                     genes = hannot[,1:3],
+                     genes = hannot[,c(1,2,4)],
                      group = groups)
 
 design <- model.matrix(~groups+0)
@@ -73,6 +81,12 @@ csbl.expr <- csbl.expr[keep, , keep.lib.sizes=FALSE]
 
 # Norm factors
 csbl.expr <- calcNormFactors(csbl.expr, method = "TMM")
+
+#tmm.csbl <- round(as.data.frame(cpm(csbl.expr)), digits = 1)
+#tmm.csbl$Symbol <- csbl.expr$genes$gene_id
+
+#write_tsv(tmm.csbl %>% relocate(Symbol), here("data", "chikv_csbl_star",
+#                                              "tmm_toMDP.tsv"))
 
 # Estimate Dispersion
 csbl.expr <- estimateDisp(csbl.expr, design)
@@ -85,14 +99,13 @@ my.contrast <- makeContrasts(earlyVShealthy = groupsearly - groupshealthy,
 
 earlyVShealthy <- glmQLFTest(fit, contrast = my.contrast[, "earlyVShealthy"])
 
-
 earlyVShealthy_t <- topTags(earlyVShealthy, n = NULL)$table
 
-####### Chronicity comparison - Early Chronic VS Ealry Non-chronic
+####### Chronicity comparison - Early Chronic VS Early Non-chronic
 groups <- as.factor(csbl.annot$group)
 
 csbl.expr <- DGEList(counts = counts_csbl_ord[,-1], 
-                     genes = hannot[,1:3],
+                     genes = hannot[,c(1,2,4)],
                      group = groups)
 
 design <- model.matrix(~groups+0)
@@ -123,21 +136,82 @@ chronVSnonChron.early_t <- topTags(chronVSnonChron.early, n = NULL)$table
 ### DEGs number
 # Chron vs Non-Chron
 chronVSnonChron.early_t %>% 
-  filter(logFC >= 1, FDR < 0.1) %>% nrow()
+  filter(logFC >= 1, FDR < 0.05) %>% nrow()
 chronVSnonChron.early_t %>% 
-  filter(logFC <= -1, FDR < 0.1) %>% nrow()
+  filter(logFC <= -1, FDR < 0.05) %>% nrow()
 
 # Early vs Late
 earlyVShealthy_t %>% 
-   filter(logFC >= 1, FDR < 0.01) %>% nrow()
+   filter(logFC >= 1, FDR < 0.05) %>% nrow()
 earlyVShealthy_t %>% 
-  filter(logFC <= -1, FDR < 0.01) %>% nrow()
+  filter(logFC <= -1, FDR < 0.05) %>% nrow()
+
+edgeR.out <- bind_rows("earlyVShealthy" = earlyVShealthy_t, 
+                      "chronVSnonChron.early" = chronVSnonChron.early_t,
+                      .id = "compar")
+write_tsv(edgeR.out, here("results", "DEG_edgeR", "csbl_phase_condition.tsv"))
+```
+
+```{r}
+arbo_edgeR.out <- read_tsv( here("results", "DEG_edgeR", 
+                                 "arbobios_phase_condition.tsv"))
+
+arbo_up <- arbo_edgeR.out %>% 
+  filter(compar == "D0VSD21") %>% 
+  filter(logFC >= 1, FDR < 0.1)
+
+arbo_down <- arbo_edgeR.out %>% 
+  filter(compar == "D0VSD21") %>% 
+  filter(logFC <= -1, FDR < 0.1)
+
+earlyVShealthy.up <- earlyVShealthy_t %>% 
+   filter(logFC >= 1, FDR < 0.1)
+
+earlyVShealthy.down <- earlyVShealthy_t %>% 
+   filter(logFC <= -1, FDR < 0.1)
+
+sum(arbo_down$GeneSymbol %in% earlyVShealthy.down$GeneSymbol)
+
+```
+
+```{r Volcano Plot}
+##### Volcano plot function (NO label)
+volc_plot <- function(topTags.out, df = immgene) {
+  up <- topTags.out %>% filter(logFC > 1 & FDR < 0.1)
+  
+  down <- topTags.out %>% filter(logFC < -1 & FDR < 0.1)
+  
+  topTags.out %>% 
+    ggplot(aes(logFC, -log10(FDR))) +
+    geom_point(color = "grey", size = 0.8) +
+    geom_point(data = up ,
+               aes(logFC, -log10(FDR)), color = "#EF8A62", size = 0.8) +
+    geom_point(data = down,
+               aes(logFC, -log10(FDR)), color = "#67A9CF", size = 0.8) +
+    geom_vline(xintercept = c(-log2(2), log2(2)), linetype="dashed", 
+                  color = "red", size = 0.3) +
+    geom_hline(yintercept = -log10(0.1), linetype="dashed", color = "red", 
+               size = 0.3) +
+    theme_classic()
+}
+
+# chronVSctrl.D0
+earlyVShealthy_vp <- volc_plot(earlyVShealthy_t)
+chronVSnonChron.early_vp <- volc_plot(chronVSnonChron.early_t)
+
+patchw <- (earlyVShealthy_vp | chronVSnonChron.early_vp)
+
+fp <- patchw + plot_annotation(tag_levels = 'A')
+
+ggsave(here("results","figures","volcanoPlot_CSBL.png"), fp, 
+       device = "png", width = 6, height = 4, units = "cm", 
+       dpi = "print", scale = 2.5)
 ```
 
 ```{r FGSEA}
 # chronVSnonChron.D0
 ranks_earlyVShealthy <- earlyVShealthy_t %>% 
-  mutate(rank = logFC) %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
   dplyr::select(GeneSymbol, rank) %>% 
   group_by(GeneSymbol) %>% 
   summarize(rank=mean(rank)) %>% 
@@ -148,7 +222,7 @@ fgseaRes_earlyVShealthy <- fgsea(pathways=gene_set,
 
 # chronVSnonChron.D21
 ranks_chronVSnonChron.early <- chronVSnonChron.early_t %>% 
-  mutate(rank = logFC) %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
   dplyr::select(GeneSymbol, rank) %>% 
   group_by(GeneSymbol) %>% 
   summarize(rank=mean(rank)) %>% 
@@ -158,7 +232,7 @@ fgseaRes_chronVSnonChron.early <- fgsea(pathways=gene_set,
                                         stats=ranks_chronVSnonChron.early, eps=0)
 
 
-# Join fgsea results
+## Join fgsea results
 fgseaRes <- bind_rows("earlyVShealthy" = fgseaRes_earlyVShealthy, 
                       "chronVSnonChron.early" = fgseaRes_chronVSnonChron.early,
                       .id = "compar") %>% 
@@ -167,6 +241,13 @@ fgseaRes <- bind_rows("earlyVShealthy" = fgseaRes_earlyVShealthy,
             by = c("pathway" = "node_name")) %>% 
   relocate(compar, pathway, root_name)
 
+# Only early VS healthy comparison
+#fgseaRes <- fgseaRes_earlyVShealthy %>%
+#  mutate(compar = "earlyVShealthy") %>% 
+#  left_join(root_node %>% 
+#              dplyr::select(root_name, node_name), 
+#            by = c("pathway" = "node_name")) %>% 
+#  relocate(compar, pathway, root_name)
 
 custom_pal <- c("#053061", "#2166AC", "#4393C3", "#92C5DE",
                         "#D1E5F0", "#FFFFFF", "#FDDBC7", "#F4A582",
@@ -182,21 +263,33 @@ fgseaRes_phase <- fgseaRes %>%
 
 max_abs_nes <- max(abs(fgseaRes_phase$NES))
 
-fgseaRes_phase %>% 
-  ggplot(aes(compar, y=pathway, size=-log10(fgseaRes_phase$padj), fill=NES)) +
-  geom_point(color = "white", shape=21) +
+csbl_phase_chron_gsea <- fgseaRes_phase %>% 
+  ggplot(aes(compar, y=pathway, size=-log10(padj), fill=NES)) +
+  geom_point(color = 'white', shape=21) +
   scale_fill_gradientn(colours=custom_pal, space = "Lab",
-                       limits=c(-max_abs_nes, max_abs_nes)) +
-  scale_size(range=c(0,5), limits=c(0, NA)) +
-  guides(size="none") +
+                       limits=c(-max_abs_nes, max_abs_nes),
+                       ) +
   facet_grid(rows = vars(root_name), scales = "free_y", space = "free_y",
-             switch = "y")+
+             switch = "y") +
+  guides(size = guide_legend(override.aes = list(fill = "black")))+
   theme_bw() +
   theme(panel.grid.major = element_line(linetype = "dashed"),
         panel.spacing = unit(0, "lines"),
         axis.text.x = element_text(angle = 30, vjust = 1, hjust=1),
         strip.text.y.left = element_text(angle = 0),
-        strip.background =element_rect(fill=NA))
+        strip.background =element_rect(fill=NA)) +
+  scale_x_discrete(name = NULL,
+                   labels= c("Chron VS non-Chron - Early", "Early VS Healthy")) +
+  scale_y_discrete(name = NULL)
+
+x <- fgseaRes %>% filter(pathway == "Neutrophil degranulation")
+z <- data.frame('csbl_leadingEdge' = unique(unlist(x$leadingEdge)))
+write_tsv(z, here('results', "GSEA", "csbl_neutrophil_leadingEdge.tsv"))
+
+ggsave(here("results","figures","csbl_phase_chronicity_gsea.png"),
+       csbl_phase_chron_gsea,
+       device = "png", width = 9, height = 6.5, units = "cm", 
+       dpi = "print", scale = 2.5)
 
 #ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES)) +
 #  geom_col(aes(fill=padj<0.05)) +
