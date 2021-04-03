@@ -12,7 +12,8 @@ library(tidyverse)
 
 ```{r Load files}
 # Phenodata
-pheno <- read.delim(here("data", "phenodata.tsv"))  
+pheno <- read.delim(here("data", "phenodata.tsv")) %>% 
+  mutate(Day = ifelse(Day == 'D0', "Early", "Late"))
 
 # TPM nomr count Not multimapping reads
 #tpm_notmulti <- read_tsv(here("data", "gene_expression", 
@@ -50,7 +51,10 @@ smpl.annot <- pheno %>%
   select(Sample, Class, Day) %>% 
   unite("Class", Class:Day) %>% 
   rename(SampleName = Sample) %>% 
-  mutate(SampleName = as.character(SampleName))
+  mutate(SampleName = as.character(SampleName))%>% 
+  mutate(Class = factor(Class, levels = c("nonChronic_Early", 
+                                             "nonChronic_Late",
+                                             "Chronic_Early", "Chronic_Late")))
 
 # TPM
 counts <- as.data.frame(tpm_notmulti[!duplicated(tpm_notmulti$GeneSymbol),])
@@ -108,7 +112,7 @@ save_plots(cem.reactome.cpm, "all",
 # Remove duplicated genes in GeneSymbol by taking the most expressed
 tmm.counts <- tmm_notmulti %>% 
   select(-gene_id, -Class) %>% 
-  mutate(meanexpr = rowMeans(across(is.numeric))) %>% 
+  mutate(meanexpr = rowMeans(across(where(is.numeric)))) %>% 
   group_by(GeneSymbol) %>% 
   slice_max(meanexpr, with_ties = F) %>% 
   select(-meanexpr) %>% 
@@ -121,13 +125,13 @@ cem.reactome.tmm <- cemitool(expr = tmm.counts, annot = smpl.annot,
 
 generate_report(cem.reactome.tmm, title = "notMultimapping_Reactome3_HGNC_TMM",
                 directory = here("results", "CEMiTool", "Report",
-                                 "notMultimapping_Reactome_HGNC_TMM"))
+                                 "notMultimapping_Reactome_HGNC_TMM_v2"))
 diagnostic_report(cem.reactome.tmm, title = "notMultimapping_Reactome3_HGNC_TMM",
                   directory = here("results", "CEMiTool", "Diagnostic",
-                                   "notMultimapping_Reactome_HGNC_TMM"))
+                                   "notMultimapping_Reactome_HGNC_TMM_v2"))
 save_plots(cem.reactome.tmm, "all", 
            directory = here("results", "CEMiTool", "Plots",
-                            "notMultimapping_Reactome_HGNC_TMM"))
+                            "notMultimapping_Reactome_HGNC_TMM_v2"))
 ```
 
 ```{r CEMiTool Multimapping}
