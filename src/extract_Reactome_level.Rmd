@@ -89,6 +89,6 @@ out.df <- df %>%
 
 # Write files with root/node association
 #write_tsv(out.df, here("data", "reactome_data", 
-#                       "ReactomePathways_leave_root_third_level.tsv"))
+#                       "ReactomePathways_leaves_root_third_level.tsv"))
 ```
 
