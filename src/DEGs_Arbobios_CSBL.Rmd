@@ -8,6 +8,7 @@ editor_options:
 library(here)
 library(tidyverse)
 library(edgeR)
+library(fgsea)
 
 options(scipen=999)
 ```
@@ -38,9 +39,15 @@ raw_arbobios <- read_tsv(here("data", "geneCounts",
 adj.counts <- read_tsv(here("data", "gene_expression",
                             "Arbobios_CSBL_rawCounts_CombatAdjusted.tsv"))
 
+# Reactome pathways
+gene_set <- gmtPathways(here("data", "reactome_data", 
+                             "ReactomePathwaysLevel3_2021-03.gmt"))
+# Reactome root node
+root_node <- read_tsv(here("data", "reactome_data", 
+                           "ReactomePathways_leave_root_third_level.tsv"))
 ```
 
-```{r DE Arbobios original}
+```{r DEGs Arbobios original data}
 pheno_arb <- pheno %>% 
   filter(dataset == "arbobios")
 
@@ -192,7 +199,7 @@ edgeR.arb_original %>%
   filter(logFC < fc.dw & FDR < stat) %>% nrow()
 ```
 
-```{r CSBL original}
+```{r DEGs CSBL original data}
 annot <- pheno %>% 
   dplyr::select(Run, condition, phase, dataset, disease.status) %>% 
   mutate(phase = ifelse(is.na(phase) == T, "healthy", phase)) %>% 
@@ -291,7 +298,7 @@ edgeR.out <- bind_rows("earlyVShealthy" = earlyVShealthy_t,
 #write_tsv(edgeR.out, here("results", "DEG_edgeR", "csbl_phase_condition.tsv"))
 ```
 
-```{r DE Arbobios adjusted}
+```{r DEGs Arbobios adjusted data}
 pheno_arb <- pheno %>% 
   filter(dataset == "arbobios")
 
@@ -405,7 +412,7 @@ stat = 0.05
 
 edgeR.arb_original %>%
   filter(compar == "chronVSnonChron.D0") %>% 
-  filter(logFC > fc.up & FDR < stat) %>% nrow()
+  filter(logFC > fc.up & FDR < stat) 
 edgeR.arb_original %>%
   filter(compar == "chronVSnonChron.D0") %>% 
   filter(logFC < fc.dw & FDR < stat) %>% nrow()  
@@ -446,7 +453,7 @@ edgeR.arb_original %>%
   filter(logFC < fc.dw & FDR < stat) %>% nrow()
 ```
 
-```{r CSBL adjusted}
+```{r DEGs CSBL adjusted data}
 annot <- pheno %>% 
   dplyr::select(Run, condition, phase, dataset, disease.status) %>% 
   mutate(phase = ifelse(is.na(phase) == T, "healthy", phase)) %>% 
@@ -540,6 +547,250 @@ earlyVShealthy_t %>%
 
 edgeR.out <- bind_rows("earlyVShealthy" = earlyVShealthy_t, 
                       "chronVSnonChron.early" = chronVSnonChron.early_t,
-                      .id = "compar")
+                    .id = "compar")
+```
+
+```{r DEGs Arbobios + CSBL adjusted data}
+sub.pheno <- pheno %>% 
+  mutate(group = paste(phase, disease.status, sep = "_")) %>% 
+  mutate(group = ifelse(group == "NA_NA", "healthy", group)) %>% 
+  filter(group != "early_NA") %>% 
+  filter(!(dataset == "csbl" & group != "healthy")) %>% 
+  mutate(group = as.factor(group)) %>% 
+  mutate(phase = ifelse(is.na(phase), "healthy", phase))
+
+group <- sub.pheno$group
+
+adj_count <- adj.counts %>% 
+  dplyr::select(Symbol = gene_id, sub.pheno$Run)
+
+y <- DGEList(counts = adj_count[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 5)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate Dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+my.contrast <- makeContrasts(
+  nonChron.D0VShealthy = groupearly_nonChronic - grouphealthy,
+  nonChron.D21VShealthy = grouplate_nonChronic - grouphealthy,
+  chron.D0VShealthy =  groupearly_chronic - grouphealthy,
+  chron.D21VShealthy = grouplate_chronic - grouphealthy,
+  levels = design)
+
+nonChron.D0VShealthy <- glmQLFTest(fit, contrast = my.contrast[, "nonChron.D0VShealthy"])
+nonChron.D21VShealthy <- glmQLFTest(fit, contrast = my.contrast[, "nonChron.D21VShealthy"])
+chron.D0VShealthy <- glmQLFTest(fit, contrast = my.contrast[, "chron.D0VShealthy"])
+chron.D21VShealthy <- glmQLFTest(fit, contrast = my.contrast[, "chron.D21VShealthy"])
+
+nonChron.D0VShealthy_t <- topTags(nonChron.D0VShealthy, n = NULL)$table
+nonChron.D21VShealthy_t <- topTags(nonChron.D21VShealthy, n = NULL)$table
+chron.D0VShealthy_t <- topTags(chron.D0VShealthy, n = NULL)$table
+chron.D21VShealthy_t <- topTags(chron.D21VShealthy, n = NULL)$table
+
+################## DEGs by Day
+sub.pheno <- pheno %>% 
+  mutate(phase = ifelse(is.na(phase), "healthy", phase)) 
+
+group <- factor(sub.pheno$phase)
+
+adj_count <- adj.counts %>% 
+  dplyr::select(Symbol = gene_id, sub.pheno$Run)
+
+y <- DGEList(counts = adj_count[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 5)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate Dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+my.contrast <- makeContrasts(
+  earlyVShealthy = groupearly - grouphealthy,
+  lateVShealthy = grouplate - grouphealthy,
+  levels = design)
+
+earlyVShealthy <- glmQLFTest(fit, contrast = my.contrast[, "earlyVShealthy"])
+lateVShealthy <- glmQLFTest(fit, contrast = my.contrast[, "lateVShealthy"])
+
+earlyVShealthy_t <- topTags(earlyVShealthy, n = NULL)$table
+lateVShealthy_t <- topTags(lateVShealthy, n = NULL)$table
+
+edgeR.arb.csbl <- bind_rows("nonChron.D0VShealthy" = nonChron.D0VShealthy_t,
+                            "nonChron.D21VShealthy" = nonChron.D21VShealthy_t,
+                            "chron.D0VShealthy" = chron.D0VShealthy_t,
+                            "chron.D21VShealthy" = chron.D21VShealthy_t,
+                            "earlyVShealthy" = earlyVShealthy_t,
+                            "lateVShealthy" = lateVShealthy_t,
+                            .id = "compar")
+
+## Number DEGs
+nonChron.D0VShealthy_t %>% filter(logFC >= 1, FDR < 0.01) %>% nrow()
+nonChron.D0VShealthy_t %>% filter(logFC <= -1, FDR < 0.01) %>% nrow()
+nonChron.D21VShealthy_t %>% filter(logFC >= 1, FDR < 0.01) %>% nrow()
+nonChron.D21VShealthy_t %>% filter(logFC <= -1, FDR < 0.01) %>% nrow()
+chron.D0VShealthy_t %>% filter(logFC >= 1, FDR < 0.01) %>% nrow()
+chron.D0VShealthy_t %>% filter(logFC <= -1, FDR < 0.01) %>% nrow()
+chron.D21VShealthy_t %>% filter(logFC >= 1, FDR < 0.01) %>% nrow()
+chron.D21VShealthy_t %>% filter(logFC <= -1, FDR < 0.01) %>% nrow()
+
+earlyVShealthy_t %>% filter(logFC >= 1, FDR < 0.01) %>% nrow()
+earlyVShealthy_t %>% filter(logFC <= -1, FDR < 0.01) %>% nrow()
+lateVShealthy_t %>% filter(logFC >= 1, FDR < 0.01) %>% nrow()
+lateVShealthy_t %>% filter(logFC <= -1, FDR < 0.01) %>% nrow()
+
+## Union
+
+nonChron.D0.up <- nonChron.D0VShealthy_t %>% filter(logFC >= 1, FDR < 0.01)
+nonChron.D0.down <- nonChron.D0VShealthy_t %>% filter(logFC <= -1, FDR < 0.01)
+nonChron.D21.up <- nonChron.D21VShealthy_t %>% filter(logFC >= 1, FDR < 0.01)
+nonChron.D21.down <- nonChron.D21VShealthy_t %>% filter(logFC <= -1, FDR < 0.01)
+
+chron.D0.up <- chron.D0VShealthy_t %>% filter(logFC >= 1, FDR < 0.01)
+chron.D0.down <-chron.D0VShealthy_t %>% filter(logFC <= -1, FDR < 0.01)
+chron.D21.up <-chron.D21VShealthy_t %>% filter(logFC >= 1, FDR < 0.01)
+chron.D21.down <-chron.D21VShealthy_t %>% filter(logFC <= -1, FDR < 0.01)
+
+
+sum(chron.D0.up$GeneSymbol %in% nonChron.D0.up$GeneSymbol)
+sum(chron.D0.down$GeneSymbol %in% nonChron.D0.down$GeneSymbol)
+
+```
+
+```{r fGSEA}
+#nonChron D0
+ranks_nonChron.D0VShealthy <-  nonChron.D0VShealthy_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_nonChron.D0VShealthy <- fgsea(pathways=gene_set, 
+                                       stats=ranks_nonChron.D0VShealthy, eps=0)
+
+#nonChron D21
+ranks_nonChron.D21VShealthy <-  nonChron.D21VShealthy_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_nonChron.D21VShealthy <- fgsea(pathways=gene_set, 
+                                       stats=ranks_nonChron.D21VShealthy, eps=0)
+
+#chron D0
+ranks_chron.D0VShealthy <- chron.D0VShealthy_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_chron.D0VShealthy <- fgsea(pathways=gene_set, 
+                                       stats=ranks_chron.D0VShealthy, eps=0)
+#chron D21
+ranks_chron.D21VShealthy <- chron.D21VShealthy_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_chron.D21VShealthy <- fgsea(pathways=gene_set, 
+                                       stats=ranks_chron.D21VShealthy, eps=0)
+# D0
+ranks_earlyVShealthy <- earlyVShealthy_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_earlyVShealthy <- fgsea(pathways=gene_set, 
+                                       stats=ranks_earlyVShealthy, eps=0)
+# D21
+ranks_lateVShealthy <- lateVShealthy_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_lateVShealthy <- fgsea(pathways=gene_set, 
+                                       stats=ranks_lateVShealthy, eps=0)
+
+## Join results
+fgseaRes <- bind_rows("nonChron.D0VShealthy" = fgseaRes_nonChron.D0VShealthy, 
+                      "nonChron.D21VShealthy" = fgseaRes_nonChron.D21VShealthy,
+                      "chron.D0VShealthy" = fgseaRes_chron.D0VShealthy,
+                      "chron.D21VShealthy" = fgseaRes_chron.D21VShealthy,
+                      "earlyVShealthy" = fgseaRes_earlyVShealthy,
+                      "lateVShealthy" = fgseaRes_lateVShealthy, 
+                      .id = "compar") %>% 
+  left_join(root_node %>% 
+              dplyr::select(root_name, node_name), 
+            by = c("pathway" = "node_name")) %>% 
+  relocate(compar, pathway, root_name)
+
+## Plot
+custom_pal <- c("#053061", "#2166AC", "#4393C3", "#92C5DE",
+                        "#D1E5F0", "#FFFFFF", "#FDDBC7", "#F4A582",
+                        "#D6604D", "#B2182B", "#67001F")
+custom_pal <- colorRampPalette(custom_pal)(200)
+
+fgseaRes_plot <- fgseaRes %>% 
+  group_by(pathway) %>% 
+  filter(any(padj < 1e-3)) %>% 
+  mutate(NES = ifelse(padj > 1e-3, 0, NES)) %>% 
+  na.omit() %>% 
+  mutate(compar = factor(compar, 
+                         levels = c("nonChron.D0VShealthy",
+                                    "chron.D0VShealthy", 
+                                    "nonChron.D21VShealthy",
+                                    "chron.D21VShealthy",
+                                    "earlyVShealthy", "lateVShealthy")))
+
+max_abs_nes <- max(abs(fgseaRes_plot$NES))
+
+fgseaRes_plot %>% 
+  ggplot(aes(compar, y=pathway, size=-log10(padj), fill=NES)) +
+  geom_point(color = 'white', shape=21) +
+  scale_fill_gradientn(colours=custom_pal, space = "Lab",
+                       limits=c(-max_abs_nes, max_abs_nes),
+                       ) +
+  facet_grid(rows = vars(root_name), scales = "free_y", space = "free_y",
+             switch = "y") +
+  guides(size = guide_legend(override.aes = list(fill = "black")))+
+  theme_bw() +
+  theme(panel.grid.major = element_line(linetype = "dashed"),
+        panel.spacing = unit(0, "lines"),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1),
+        strip.text.y.left = element_text(angle = 0),
+        strip.background =element_rect(fill=NA))
 ```
 
