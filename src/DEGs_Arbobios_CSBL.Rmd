@@ -44,7 +44,7 @@ gene_set <- gmtPathways(here("data", "reactome_data",
                              "ReactomePathwaysLevel3_2021-03.gmt"))
 # Reactome root node
 root_node <- read_tsv(here("data", "reactome_data", 
-                           "ReactomePathways_leave_root_third_level.tsv"))
+                           "ReactomePathways_leaves_root_third_level.tsv"))
 ```
 
 ```{r DEGs Arbobios original data}
