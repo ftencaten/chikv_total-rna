@@ -12,7 +12,7 @@ library(tidyverse)
 
 ```{r Load files}
 # Phenodata
-pheno <- read.delim(here("data", "phenodata.tsv")) %>% 
+pheno <- read.delim(here("data", "phenodata_revision.tsv")) %>% 
   mutate(Day = ifelse(Day == 'D0', "Early", "Late"))
 
 # TPM nomr count Not multimapping reads
@@ -24,7 +24,7 @@ pheno <- read.delim(here("data", "phenodata.tsv")) %>%
 #                              "counts_NOTmultimapping_CPM.tsv"))
 
 # TMM Not multimapping
-tmm_notmulti <- read_tsv(here("data", "gene_expression", 
+tmm_notmulti <- read_tsv(here("data", "gene_expression", '98libs',
                               "counts_NOTmultimapping_TMM_allGenes.tsv"))
 
 
@@ -48,9 +48,9 @@ int_df <- read_tsv(here("data", "interaction_DB",
 
 ```{r Run CEMiTool NOT Multimapping}
 smpl.annot <- pheno %>% 
-  select(Sample, Class, Day) %>% 
+  dplyr::select(Sample, Class, Day) %>% 
   unite("Class", Class:Day) %>% 
-  rename(SampleName = Sample) %>% 
+  dplyr::rename(SampleName = Sample) %>% 
   mutate(SampleName = as.character(SampleName))%>% 
   mutate(Class = factor(Class, levels = c("nonChronic_Early", 
                                              "nonChronic_Late",
@@ -111,7 +111,7 @@ save_plots(cem.reactome.cpm, "all",
 # Reactome TMM
 # Remove duplicated genes in GeneSymbol by taking the most expressed
 tmm.counts <- tmm_notmulti %>% 
-  select(-gene_id, -Class) %>% 
+  dplyr::select(-gene_id, -Class) %>% 
   mutate(meanexpr = rowMeans(across(where(is.numeric)))) %>% 
   group_by(GeneSymbol) %>% 
   slice_max(meanexpr, with_ties = F) %>% 
@@ -125,13 +125,13 @@ cem.reactome.tmm <- cemitool(expr = tmm.counts, annot = smpl.annot,
 
 generate_report(cem.reactome.tmm, title = "notMultimapping_Reactome3_HGNC_TMM",
                 directory = here("results", "CEMiTool", "Report",
-                                 "notMultimapping_Reactome_HGNC_TMM_v2"))
+                                 "notMultimapping_Reactome_HGNC_TMM_98libs"))
 diagnostic_report(cem.reactome.tmm, title = "notMultimapping_Reactome3_HGNC_TMM",
                   directory = here("results", "CEMiTool", "Diagnostic",
-                                   "notMultimapping_Reactome_HGNC_TMM_v2"))
+                                   "notMultimapping_Reactome_HGNC_TMM_98libs"))
 save_plots(cem.reactome.tmm, "all", 
            directory = here("results", "CEMiTool", "Plots",
-                            "notMultimapping_Reactome_HGNC_TMM_v2"))
+                            "notMultimapping_Reactome_HGNC_TMM_98libs"))
 ```
 
 ```{r CEMiTool Multimapping}

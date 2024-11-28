@@ -11,7 +11,7 @@ library(edgeR)
 library(ggfortify)
 library(RColorBrewer)
 library(sva)
-library(CEMiTool)
+#library(CEMiTool)
 library(viridis)
 ```
 
@@ -49,8 +49,8 @@ int_df <- read_tsv(here("data", "interaction_DB",
                         "9606.gene.physical.links.STRINGv11_HGNC.tsv")) %>% 
   as.data.frame()
 
-#adj.raw.counts <- read_tsv(here("data", "gene_expression", 
-#                                "Arbobios_CSBL_rawCounts_CombatAdjusted.tsv"))
+adj.raw.counts <- read_tsv(here("data", "gene_expression", 
+                                "Arbobios_CSBL_rawCounts_CombatAdjusted.tsv"))
 
 ```
 
@@ -129,13 +129,13 @@ pcaResults <- prcomp(M)
 
 pca <- autoplot(pcaResults, data = as.data.frame(annot), 
                 colour = "dataset", shape = "phase",
-                main = "Arbobios / CSBL datasets") +
+                main = "CHIKV - Arbobios / CSBL") +
   scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
   theme_bw()
 
-#ggsave(here("results","figures","PCA_Arbobios_CSBL_dataset.png"), pca, 
-#       device = "png", width = 10, height = 6, units = "cm", 
-#       dpi = "print", scale = 2)
+ggsave(here("results","figures","PCA_Arbobios_CSBL_dataset.png"), pca, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 1.2)
 ```
 
 ```{r Combat-seq}
@@ -186,25 +186,24 @@ pcaResults.adj <- prcomp(M.adj)
 
 pca.adj <- autoplot(pcaResults.adj, data = as.data.frame(annot), 
                 colour = "dataset", shape = "phase",
-                main = "Arbobios / CSBL datasets - Batch correction") +
+                main = "Batch correction") +
   scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
   theme_bw()
 
-#ggsave(here("results", "figures",
-#            "PCA_Arbobios_CSBL_dataset_Combatseq_adjusted.png"), 
-#       pca.adj, device = "png", width = 10, height = 6, units = "cm", 
-#       dpi = "print", scale = 2)
+ggsave(here("results", "figures",
+            "PCA_Arbobios_CSBL_dataset_Combatseq_adjusted.png"), 
+       pca.adj, device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 1.2)
 
-pca.adj.chron 
-autoplot(pcaResults.adj, data = as.data.frame(annot), 
-                          colour = "disease.status", shape = "phase", alpha = "dataset",
-                          main = "CHIKV Chronicity - Batch correction") +
+pca.adj.chron <- autoplot(pcaResults.adj, data = as.data.frame(annot), 
+                          colour = "disease.status", shape = "phase",
+                          main = "Chronic") +
   scale_colour_viridis(discrete = T) +
   theme_bw()
 
-#ggsave(here("results", "figures",
-#            "PCA_Arbobios_CSBL_dataset_Combatseq_adjusted_chronicity.png"), 
-#       pca.adj.chron, device = "png", width = 10, height = 6, units = "cm", 
-#       dpi = "print", scale = 2)
+ggsave(here("results", "figures",
+            "PCA_Arbobios_CSBL_dataset_Combatseq_adjusted_chronicity.png"), 
+       pca.adj.chron, device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 1.2)
 ```
 

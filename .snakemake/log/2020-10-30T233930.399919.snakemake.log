@@ -1,0 +1,135 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 8
+Rules claiming more threads will be scaled down.
+Job counts:
+	count	jobs
+	1	all
+	1	assemble_unmapped
+	1	assembled_references
+	1	bam_sort
+	1	bowtie2_map
+	1	build_contigs
+	1	create_tsv
+	1	join_contigs
+	1	mapping_stats
+	1	pilon_contigs
+	1	pilon_map
+	1	sam_to_bam
+	1	stats_all
+	1	stats_genome
+	14
+
+[Fri Oct 30 23:39:30 2020]
+Job 10: ---Build index .
+
+bowtie2-build -o 3 --threads 8 -q data/C302F_2016_BR.fasta results/metacompass_2/1015915/assembly/mc.index 1>> results/metacompass_2/1015915/assembly/mc.index 2>&1;bowtie2 -a --end-to-end --sensitive --no-unal -p 8 -x results/metacompass_2/1015915/assembly/mc.index -q -U data/unmapped_2/1015915_Unmapped.out.mate1.gz,data/unmapped_2/1015915_Unmapped.out.mate2.gz -S results/metacompass_2/1015915/assembly/mc.sam.all > results/metacompass_2/1015915/logs/bowtie2map.log 2>&1; python3 /home/ftencaten/MetaCompass-2.0-beta/bin/best_strata.py results/metacompass_2/1015915/assembly/mc.sam.all results/metacompass_2/1015915/assembly/mc.sam; rm results/metacompass_2/1015915/assembly/mc.sam.all && touch results/metacompass_2/1015915/assembly/.run1.ok
+[Fri Oct 30 23:39:57 2020]
+Finished job 10.
+1 of 14 steps (7%) done
+
+[Fri Oct 30 23:39:57 2020]
+Job 6: ---Build contigs .
+
+/home/ftencaten/MetaCompass-2.0-beta/bin/buildcontig -r data/C302F_2016_BR.fasta -s results/metacompass_2/1015915/assembly/mc.sam -o results/metacompass_2/1015915/assembly -c 3 -l 1 -n F -b F -u F -k breadth  1>> results/metacompass_2/1015915/logs/buildcontigs.log 2>&1 && touch results/metacompass_2/1015915/assembly/.run2.ok
+[Fri Oct 30 23:39:57 2020]
+Finished job 6.
+2 of 14 steps (14%) done
+
+[Fri Oct 30 23:39:57 2020]
+Job 11: ---Map reads for pilon polishing.
+
+bowtie2-build --threads 8 -q results/metacompass_2/1015915/assembly/contigs.fasta results/metacompass_2/1015915/error_correction/mc.index 1>> results/metacompass_2/1015915/error_correction/mc.index 2>&1;bowtie2 --no-mixed --sensitive --no-unal -p 8 -x results/metacompass_2/1015915/error_correction/mc.index -q -1 data/unmapped_2/1015915_Unmapped.out.mate1.gz -2 data/unmapped_2/1015915_Unmapped.out.mate2.gz -S results/metacompass_2/1015915/error_correction/mc.sam --un-conc results/metacompass_2/1015915/error_correction/mc.sam.unmapped.fq > results/metacompass_2/1015915/logs/pilonmap.log 2>&1 && touch results/metacompass_2/1015915/error_correction/.run1.ok
+[Fri Oct 30 23:40:40 2020]
+Finished job 11.
+3 of 14 steps (21%) done
+
+[Fri Oct 30 23:40:40 2020]
+Job 8: ---Assemble unmapped reads .
+
+if [[ -s results/metacompass_2/1015915/error_correction/mc.sam.unmapped.1.fq || -s results/metacompass_2/1015915/error_correction/mc.sam.unmapped.2.fq ]]; then rm -rf results/metacompass_2/1015915/assembly/megahit; megahit -o results/metacompass_2/1015915/assembly/megahit --min-count 3 --min-contig-len 1 --presets meta-sensitive -t 8 -1 results/metacompass_2/1015915/error_correction/mc.sam.unmapped.1.fq -2 results/metacompass_2/1015915/error_correction/mc.sam.unmapped.2.fq  1>> results/metacompass_2/1015915/logs/megahit.log 2>&1; else touch results/metacompass_2/1015915/assembly/megahit/final.contigs.fa results/metacompass_2/1015915/logs/megahit.log; echo 'No unmapped reads to run de novo assembly' >results/metacompass_2/1015915/logs/megahit.log ;fi && touch results/metacompass_2/1015915/assembly/.run4.ok
+[Fri Oct 30 23:55:54 2020]
+Finished job 8.
+4 of 14 steps (29%) done
+
+[Fri Oct 30 23:55:54 2020]
+Job 9: ---Assembled references .
+
+grep '>' results/metacompass_2/1015915/assembly/contigs.fasta |rev| cut -f2- -d '_'|rev|tr -d '>'|uniq > results/metacompass_2/1015915/assembly/metacompass.assembled.ids;/home/ftencaten/MetaCompass-2.0-beta/bin/extractSeq data/C302F_2016_BR.fasta results/metacompass_2/1015915/assembly/metacompass.assembled.ids > results/metacompass_2/1015915/assembly/metacompass.assembled.fna && touch results/metacompass_2/1015915/assembly/.run3.ok
+
+[Fri Oct 30 23:55:54 2020]
+Job 13: ---Convert sam to bam .
+
+samtools view -bS results/metacompass_2/1015915/error_correction/mc.sam -o results/metacompass_2/1015915/error_correction/mc.sam.bam 1>> results/metacompass_2/1015915/logs/samtools_sam2bam.log 2>&1 && touch results/metacompass_2/1015915/error_correction/.run2.ok
+[Fri Oct 30 23:55:54 2020]
+Finished job 9.
+5 of 14 steps (36%) done
+
+[Fri Oct 30 23:55:54 2020]
+Job 4: ---mapping stats per genome in reference-guided contigs
+
+grep '>' data/C302F_2016_BR.fasta|tr -d '>' > results/metacompass_2/1015915/mc.refseq.ids ;sh /home/ftencaten/MetaCompass-2.0-beta/bin/mapping_stats.sh results/metacompass_2/1015915/mc.refseq.ids results/metacompass_2/1015915/assembly/metacompass.assembled.ids results/metacompass_2/1015915/logs/bowtie2map.log results/metacompass_2/1015915/logs/pilonmap.log results/metacompass_2/1015915/assembly/selected_maps.sam results/metacompass_2/1015915/metacompass_output/metacompass_mapping_stats.tsv results/metacompass_2/1015915/metacompass_output/metacompass_mapping_pergenome_stats.tsv && touch results/metacompass_2/1015915/metacompass_output/.run4.ok
+[Fri Oct 30 23:55:54 2020]
+Finished job 4.
+6 of 14 steps (43%) done
+[Fri Oct 30 23:55:54 2020]
+Finished job 13.
+7 of 14 steps (50%) done
+
+[Fri Oct 30 23:55:54 2020]
+Job 12: ---Sort bam .
+
+samtools sort -@ 8 results/metacompass_2/1015915/error_correction/mc.sam.bam -o results/metacompass_2/1015915/error_correction/sorted.bam -O bam -T $RANDOM 1>> results/metacompass_2/1015915/logs/samtools_bamsort.log 2>&1; samtools index results/metacompass_2/1015915/error_correction/sorted.bam 1>> results/metacompass_2/1015915/logs/samtools_bamsort.log 2>&1 && touch results/metacompass_2/1015915/error_correction/.run3.ok 
+[Fri Oct 30 23:55:55 2020]
+Finished job 12.
+8 of 14 steps (57%) done
+
+[Fri Oct 30 23:55:55 2020]
+Job 7: ---Pilon polish contigs .
+
+java -Xmx12G -jar /home/ftencaten/MetaCompass-2.0-beta/bin/pilon-1.23.jar --flank 5 --threads 8 --mindepth 3 --genome results/metacompass_2/1015915/assembly/contigs.fasta --frags results/metacompass_2/1015915/error_correction/sorted.bam --output results/metacompass_2/1015915/error_correction/contigs.pilon --fix bases,amb --tracks --changes 1>> results/metacompass_2/1015915/logs/pilon.log 2>&1  && touch results/metacompass_2/1015915/error_correction/.run4.ok
+[Fri Oct 30 23:55:56 2020]
+Finished job 7.
+9 of 14 steps (64%) done
+
+[Fri Oct 30 23:55:56 2020]
+Job 5: ---concanenate reference-guided and de novo contigs
+
+cat results/metacompass_2/1015915/assembly/megahit/final.contigs.fa results/metacompass_2/1015915/error_correction/contigs.pilon.fasta > results/metacompass_2/1015915/metacompass_output/metacompass.final.ctg.fa && touch results/metacompass_2/1015915/assembly/.run5.ok
+[Fri Oct 30 23:55:56 2020]
+Finished job 5.
+10 of 14 steps (71%) done
+
+[Fri Oct 30 23:55:56 2020]
+Job 3: ---assembly stats per genome in reference-guided contigs
+
+sh /home/ftencaten/MetaCompass-2.0-beta/bin/assembly_percontig_stats.sh /home/ftencaten/MetaCompass-2.0-beta results/metacompass_2/1015915 assembly results/metacompass_2/1015915/error_correction/contigs.pilon.fasta 1  > results/metacompass_2/1015915/metacompass_output/metacompass_assembly_pergenome_stats.tsv && touch results/metacompass_2/1015915/metacompass_output/.run3.ok
+
+[Fri Oct 30 23:55:56 2020]
+Job 2: ---assembly stats reference-guided contigs
+
+python3 /home/ftencaten/MetaCompass-2.0-beta/bin/assembly_stats.py results/metacompass_2/1015915/metacompass_output/metacompass.final.ctg.fa 1 > results/metacompass_2/1015915/metacompass_output/metacompass_assembly_stats.tsv && touch results/metacompass_2/1015915/metacompass_output/.run2.ok
+
+[Fri Oct 30 23:55:56 2020]
+Job 1: ---information reference-guided and de novo contigs
+
+sh /home/ftencaten/MetaCompass-2.0-beta/bin/create_tsv.sh results/metacompass_2/1015915/error_correction/contigs.pilon.fasta results/metacompass_2/1015915/assembly/contigs.fasta results/metacompass_2/1015915/assembly/megahit/final.contigs.fa results/metacompass_2/1015915/assembly/metacompass.assembled.fna data/C302F_2016_BR.fasta results/metacompass_2/1015915/metacompass_output/metacompass_summary.tsv && touch results/metacompass_2/1015915/metacompass_output/.run1.ok
+[Fri Oct 30 23:55:56 2020]
+Finished job 3.
+11 of 14 steps (79%) done
+[Fri Oct 30 23:55:56 2020]
+Finished job 1.
+12 of 14 steps (86%) done
+[Fri Oct 30 23:55:57 2020]
+Finished job 2.
+13 of 14 steps (93%) done
+
+[Fri Oct 30 23:55:57 2020]
+localrule all:
+    input: results/metacompass_2/1015915/metacompass_output/metacompass_summary.tsv, results/metacompass_2/1015915/metacompass_output/metacompass_assembly_stats.tsv, results/metacompass_2/1015915/metacompass_output/metacompass_assembly_pergenome_stats.tsv, results/metacompass_2/1015915/metacompass_output/metacompass_mapping_stats.tsv, results/metacompass_2/1015915/metacompass_output/metacompass_mapping_pergenome_stats.tsv
+    jobid: 0
+
+[Fri Oct 30 23:55:57 2020]
+Finished job 0.
+14 of 14 steps (100%) done
+Complete log: /home/ftencaten/GDrive/Projetos/chikv_total-rna/.snakemake/log/2020-10-30T233930.399919.snakemake.log

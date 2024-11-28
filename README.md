@@ -4,7 +4,8 @@
 <!-- badges: start -->
 <!-- badges: end -->
 
-Conjunto de scripts para análise de dados de transcritômica e metabolômica 
-de amostras obtidas de pacientes infectados por CHIKV com boa resolução da 
-infecção ou com evolução para fase crônica.
+Scripts for transcriptomic data analysis from the article "From acute to chronic: 
+transcriptomic insights into post-chikungunya chronic inflammatory joint disease" 
+Ramundo MS, Fonseca GC, et al. 
+
 

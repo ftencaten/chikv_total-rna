@@ -54,6 +54,7 @@ for (i in 1:length(root)) {
 }
 
 reactome_df <- plyr::ldply(leaves.list, rbind)
+#write_tsv(reactome_df, 'data/reactome_levels.tsv')
 
 # Extract third level nodes
 third_level <- reactome_df %>% 

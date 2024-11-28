@@ -1,0 +1,41 @@
+Building DAG of jobs...
+Using shell: /usr/bin/bash
+Provided cores: 8
+Rules claiming more threads will be scaled down.
+Job counts:
+	count	jobs
+	1	all
+	1	assemble_unmapped
+	1	assembled_references
+	1	bam_sort
+	1	bowtie2_map
+	1	build_contigs
+	1	create_tsv
+	1	join_contigs
+	1	mapping_stats
+	1	pilon_contigs
+	1	pilon_map
+	1	sam_to_bam
+	1	stats_all
+	1	stats_genome
+	14
+
+[Fri Nov  6 18:54:17 2020]
+Job 10: ---Build index .
+
+bowtie2-build -o 3 --threads 8 -q data/C302F_2016_BR.fasta results/metacompass_3/1106315/assembly/mc.index 1>> results/metacompass_3/1106315/assembly/mc.index 2>&1;bowtie2 -a --end-to-end --sensitive --no-unal -p 8 -x results/metacompass_3/1106315/assembly/mc.index -q -U data/unmapped_3/1106315_Unmapped.out.mate1.gz,data/unmapped_3/1106315_Unmapped.out.mate2.gz -S results/metacompass_3/1106315/assembly/mc.sam.all > results/metacompass_3/1106315/logs/bowtie2map.log 2>&1; python3 /home/ftencaten/MetaCompass-2.0-beta/bin/best_strata.py results/metacompass_3/1106315/assembly/mc.sam.all results/metacompass_3/1106315/assembly/mc.sam; rm results/metacompass_3/1106315/assembly/mc.sam.all && touch results/metacompass_3/1106315/assembly/.run1.ok
+[Fri Nov  6 18:55:54 2020]
+Error in rule bowtie2_map:
+    jobid: 10
+    output: results/metacompass_3/1106315/assembly/mc.index, results/metacompass_3/1106315/assembly/mc.index, results/metacompass_3/1106315/assembly/mc.sam, results/metacompass_3/1106315/logs/bowtie2map.log
+
+RuleException:
+CalledProcessError in line 42 of /home/ftencaten/MetaCompass-2.0-beta/snakemake/metacompass.ref.paired.py:
+Command ' set -euo pipefail;  bowtie2-build -o 3 --threads 8 -q data/C302F_2016_BR.fasta results/metacompass_3/1106315/assembly/mc.index 1>> results/metacompass_3/1106315/assembly/mc.index 2>&1;bowtie2 -a --end-to-end --sensitive --no-unal -p 8 -x results/metacompass_3/1106315/assembly/mc.index -q -U data/unmapped_3/1106315_Unmapped.out.mate1.gz,data/unmapped_3/1106315_Unmapped.out.mate2.gz -S results/metacompass_3/1106315/assembly/mc.sam.all > results/metacompass_3/1106315/logs/bowtie2map.log 2>&1; python3 /home/ftencaten/MetaCompass-2.0-beta/bin/best_strata.py results/metacompass_3/1106315/assembly/mc.sam.all results/metacompass_3/1106315/assembly/mc.sam; rm results/metacompass_3/1106315/assembly/mc.sam.all && touch results/metacompass_3/1106315/assembly/.run1.ok ' returned non-zero exit status 1.
+  File "/home/ftencaten/MetaCompass-2.0-beta/snakemake/metacompass.ref.paired.py", line 42, in __rule_bowtie2_map
+  File "/usr/lib/python3.7/concurrent/futures/thread.py", line 57, in run
+Removing output files of failed job bowtie2_map since they might be corrupted:
+results/metacompass_3/1106315/assembly/mc.index, results/metacompass_3/1106315/assembly/mc.index, results/metacompass_3/1106315/assembly/mc.sam, results/metacompass_3/1106315/logs/bowtie2map.log
+Shutting down, this might take some time.
+Exiting because a job execution failed. Look above for error message
+Complete log: /home/ftencaten/GDrive/Projetos/chikv_total-rna/.snakemake/log/2020-11-06T185417.508750.snakemake.log
