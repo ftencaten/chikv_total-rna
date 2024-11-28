@@ -148,6 +148,7 @@ rownames(annot) <- pheno$Sample
 # Not multimapping CPM
 M <- t(tmm.counts[selectedGenes,])
 
+
 M <- log1p(M)
 
 pcaResults <- prcomp(M, scale. = T)
