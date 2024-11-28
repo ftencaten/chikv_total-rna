@@ -1,5 +1,5 @@
 
-# pchikv_cijd_transcriptomics
+# Post-Chikungunya Chronic Inflammatory Joint Disease (pCHIKV-CIJD)
 
 <!-- badges: start -->
 <!-- badges: end -->
