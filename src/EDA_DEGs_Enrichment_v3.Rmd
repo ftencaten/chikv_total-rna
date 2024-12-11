@@ -154,13 +154,17 @@ M <- log1p(M)
 pcaResults <- prcomp(M, scale. = T)
 
 pca <- autoplot(pcaResults, data = as.data.frame(annot), 
-         colour = 'Day', shape = "Class") +
-  scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
+         fill = 'Day', shape = "Class") +
+  scale_fill_manual(values = brewer.pal(3, "Dark2")[2:3], name = 'Phase',
+                    labels = c('Acute', 'Post-acute')) +
+  scale_shape_manual(values = c(21, 24), name = 'Group',
+                     labels = c('pCHIKV-CIJD', 'non-pCHIKV-CIJD')) +
+  guides(fill = guide_legend(override.aes = list(shape = 22))) +
   theme_bw()
 
-ggsave(here("results","figures",'98libs', "PCA_TMM.png"), pca, 
-       device = "png", width = 10, height = 6, units = "cm", 
-       dpi = "print", scale = 1)
+#ggsave(here("results","figures",'98libs', "PCA_TMM.png"), pca, 
+#       device = "png", width = 10, height = 6, units = "cm", 
+#       dpi = "print", scale = 1)
 ```
 
 ```{r DE analysis Not multimapping - edgeR}
