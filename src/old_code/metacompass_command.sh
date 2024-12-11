@@ -1,0 +1,1 @@
+id=`cat data/id_list_chikv_total.txt`; for i in $id; do python3 ~/MetaCompass-2.0-beta/go_metacompass.py -r data/C302F_2016_BR.fasta -1 data/unmapped/${i}_Unmapped.out.mate1.gz -2 data/unmapped/${i}_Unmapped.out.mate2.gz -o results/metacompass/${i} -t 8 -y 12 -l 75 ; done

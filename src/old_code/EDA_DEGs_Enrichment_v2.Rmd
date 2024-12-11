@@ -1,0 +1,896 @@
+---
+title: "RNA-seq analysis - CHIKV infection"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r Load libraries}
+library(here)
+library(tidyverse)
+library(edgeR)
+library(EDASeq)
+library(pheatmap)
+library(ggfortify)
+library(RColorBrewer)
+library(fgsea)
+library(patchwork)
+library(ggrepel)
+
+options(scipen=999)
+```
+
+```{r Load files}
+# Immune response genes
+immgene <- read_tsv(here("data", "immune_response_GO0006955_genes.txt"),
+                    col_names = F)
+
+# Human genome annotation
+hannot <- read_tsv(here("data", 
+                        "Homo_sapiens.GRCh38.100_gene_annotation_table.txt"))
+
+# Phenodata
+pheno <- read_tsv(here("data", 'phenodata', "phenodata.tsv")) %>% 
+  mutate(Class = factor(Class), Day  = factor(Day)) 
+
+
+# Read not multimapping file
+rawcount <- read_tsv(here("data", "geneCounts",
+                          "rawCounts_featureCounts_NOTmultimapping.tsv")) %>%
+  rename_with(~ sub(".Aligned.sortedByCoord.out.bam", "", .x), 
+              ends_with("bam")) %>% 
+  rename_with(~ sub("19017", "", .x), everything()) %>% 
+  rename_with(~ sub("Aligned.out.bam", "", .x), everything()) %>% 
+  dplyr::select("Symbol", sort(colnames(.)))
+
+gene_set <- gmtPathways(here("data", "reactome_data", 
+                             "ReactomePathwaysLevel3_2021-03.gmt"))
+
+root_node <- read_tsv(here("data", "reactome_data", 
+                           "ReactomePathways_leave_root_third_level.tsv"))
+
+```
+
+```{r Prepare to NetworkAnalyst}
+x <- rawcount %>% 
+  column_to_rownames("Symbol") %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("Sample") %>%
+  mutate(Sample = as.numeric(Sample)) %>% 
+  full_join(pheno %>% select(-Batch)) %>% 
+  relocate(Sample, Class, Day) %>% 
+  t() %>% 
+  as.data.frame() %>% 
+  rownames_to_column("id")
+
+write_tsv(x, here("data","geneCounts",
+               "rawCounts_featureCounts_NOTmultimapping_NetworkAnalyst.txt"),
+          col_names = F)
+
+```
+
+
+```{r TMM normalization}
+# Not multimapping TMM
+group <- factor(paste(pheno$Class, pheno$Day, sep = "_"))
+
+expr <- DGEList(counts = rawcount[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+expr.norm.fact <- calcNormFactors(expr, method = 'TMM')
+
+tmm.counts <- cpm(expr.norm.fact, log = F)
+out.tmm.counts <- cbind(hannot[,c(1,2,4)], tmm.counts)
+
+rownames(tmm.counts) <- expr.norm.fact$genes$gene_id
+#write_tsv(out.tmm.counts,
+#          here("data", "gene_expression", 
+#               "counts_NOTmultimapping_TMM_allGenes.tsv"))
+```
+
+```{r Heatmap}
+V <- apply(tmm.counts, 1, var)
+
+selectedGenes <- names(V[order(V, decreasing = T)][1:500])
+
+annot <- pheno[,2:4]
+rownames(annot) <- pheno$Sample
+
+colors <- colorRampPalette(c("blue","white","red"))
+
+heatmap <- pheatmap(tmm.counts[selectedGenes,], scale = 'row', 
+                    show_rownames = F, annotation_col = as.data.frame(annot),
+                    show_colnames = F, 
+                    color = colors(100))
+
+#ggsave(here("results","figures","Heatmap_top-variance-genes.png"), heatmap, 
+#       device = "png", width = 10, height = 6, units = "cm", 
+#       dpi = "print", scale = 2)
+```
+
+```{r RLE}
+colors <- brewer.pal(3, "Set2")
+
+# Not multimapping
+plotRLE(as.matrix(rawcount[,-1]), outline = FALSE, 
+        col = colors[pheno$Class], ylim = c(-4, 4), 
+        main = "Raw counts", 
+        ylab= "Relative Log Expression")
+
+plotRLE(tmm.counts, outline=FALSE, col = colors[pheno$Class],
+        ylim = c(-2, 2), main = "TMM", 
+        ylab= "Relative Log Expression")
+```
+
+```{r PCA}
+V <- apply(tmm.counts, 1, var)
+
+selectedGenes <- names(V[order(V, decreasing = T)][1:500])
+
+annot <- pheno[,2:4]
+rownames(annot) <- pheno$Sample
+
+# Not multimapping CPM
+M <- t(tmm.counts[selectedGenes,])
+
+M <- log2(M + 1)
+
+pcaResults <- prcomp(M)
+
+pca <- autoplot(pcaResults, data = as.data.frame(annot), 
+         colour = 'Day', shape = "Class") +
+  scale_color_manual(values = brewer.pal(3, "Dark2")[2:3]) +
+  theme_bw()
+
+#ggsave(here("results","figures","PCA_TMM.png"), pca_notmulti, 
+#       device = "png", width = 10, height = 6, units = "cm", 
+#       dpi = "print", scale = 1)
+```
+
+```{r DE analysis Not multimapping - edgeR}
+group <- factor(paste(pheno$Class, pheno$Day, sep = "_"))
+
+y <- DGEList(counts = rawcount[,-1], 
+             genes = hannot[,c(1,2,4)],
+            group = group)
+
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 1)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+#plotMDS(y, col = brewer.pal(4,"Set2")[group], labels = group)
+
+tmm <- cpm(y)
+rownames(tmm) <- y$genes$gene_id
+
+out.tmm <- tmm %>% 
+  as.data.frame() %>% 
+  rownames_to_column('gene_id') %>% 
+  left_join(hannot[,c(1,2,4)]) %>% 
+  relocate("gene_id", "GeneSymbol", "Class")
+
+#write_tsv(out.tmm,
+#          here("data", "gene_expression", 
+#               "counts_NOTmultimapping_TMM_filtered_20k.tsv"))
+
+# Estimate Dispersion
+y <- estimateDisp(y, design)
+#plotBCV(y)
+
+#DE
+fit <- glmQLFit(y, design)
+
+my.contrast <- makeContrasts(
+  chronVSnonChron.D0 = groupChronic_D0 - groupnonChronic_D0,
+  chronVSnonChron.D21 = groupChronic_D21 - groupnonChronic_D21,
+  chronD0VSchronD21 = groupChronic_D0 - groupChronic_D21,
+  nonChronD0VSnonChronD21 = groupnonChronic_D0 - groupnonChronic_D21,
+  chronVSnonChron = (groupChronic_D21 + groupChronic_D0)/2 - (groupnonChronic_D21 +
+                                                              groupnonChronic_D0)/2,
+  D0VSD21 = (groupChronic_D0 + groupnonChronic_D0)/2 - (groupChronic_D21 + 
+                                                        groupnonChronic_D21)/2,
+  levels = design)
+
+chronVSnonChron.D0 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSnonChron.D0"])
+chronVSnonChron.D21 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSnonChron.D21"])
+chronD0VSchronD21 <- glmQLFTest(fit, contrast = my.contrast[, "chronD0VSchronD21"])
+nonChronD0VSnonChronD21 <- glmQLFTest(fit, 
+                                      contrast = my.contrast[, "nonChronD0VSnonChronD21"])
+chronVSnonChron <- glmQLFTest(fit, contrast = my.contrast[, "chronVSnonChron"])
+D0VSD21 <- glmQLFTest(fit, contrast = my.contrast[, "D0VSD21"])
+
+chronVSnonChron.D0_t <- topTags(chronVSnonChron.D0, n = NULL)$table
+chronVSnonChron.D21_t <- topTags(chronVSnonChron.D21, n = NULL)$table
+chronD0VSchronD21_t <- topTags(chronD0VSchronD21, n = NULL)$table
+nonChronD0VSnonChronD21_t <- topTags(nonChronD0VSnonChronD21, n = NULL)$table
+chronVSnonChron_t <- topTags(chronVSnonChron, n = NULL)$table
+D0VSD21_t <- topTags(D0VSD21, n = NULL)$table
+
+meanTMM <- cbind(y$genes[,1:3],
+                 rowMeans(tmm[,group == 'nonChronic_D0']), 
+                 rowMeans(tmm[,group == 'nonChronic_D21']),
+                 rowMeans(tmm[,group == 'Chronic_D0']),
+                 rowMeans(tmm[,group == 'Chronic_D21']))
+
+colnames(meanTMM) <- c("gene_id", "GeneSymbol", "Class",
+                       'nonChronic_D0_TMM', 'nonChronic_D21_TMM', 
+                       'Chronic_D0_TMM', 'Chronic_D21_TMM')
+
+#write_tsv(meanTMM,
+#          here("results", "DEG_edgeR", 
+#               "meanTMM_by_group.tsv"))
+
+################## DEGs by Class
+group <- factor(pheno$Class)
+
+y <- DGEList(counts = rawcount[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 1)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+chronVSnonChron <- glmQLFTest(fit, contrast = c(1,-1))
+chronVSnonChron_t <- topTags(chronVSnonChron, n = NULL)$table
+
+################## DEGs by Day
+group <- factor(pheno$Day)
+
+y <- DGEList(counts = rawcount[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 1)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+
+# Estimate dispersion
+y <- estimateDisp(y, design)
+
+#DE
+fit <- glmQLFit(y, design)
+
+D0VSD21 <- glmQLFTest(fit, contrast = c(1,-1))
+D0VSD21_t <- topTags(D0VSD21, n = NULL)$table
+
+############ Join
+edger.output <- meanTMM %>% 
+  full_join(chronVSnonChron.D0_t, by = c("gene_id","GeneSymbol","Class")) %>% 
+  full_join(chronVSnonChron.D21_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronVSnonChron.D0", "_chronVSnonChron.D21")) %>% 
+  full_join(chronD0VSchronD21_t, by = c("gene_id","GeneSymbol","Class")) %>% 
+  full_join(nonChronD0VSnonChronD21_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronD0VSchronD21", "_nonChronD0VSnonChronD21")) %>%
+  full_join(chronVSnonChron_t, by = c("gene_id","GeneSymbol","Class")) %>%
+  full_join(D0VSD21_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronVSnonChron", "_D0VSD21"))
+
+edgeR.out <- bind_rows("chronVSnonChron.D0" = chronVSnonChron.D0_t,
+                       "chronVSnonChron.D21" = chronVSnonChron.D21_t,
+                       "chronD0VSchronD21" = chronD0VSchronD21_t,
+                       "nonChronD0VSnonChronD21" = nonChronD0VSnonChronD21_t,
+                       "chronVSnonChron" = chronVSnonChron_t,
+                       "D0VSD21" = D0VSD21_t,
+                      .id = "compar")
+
+#write_tsv(edgeR.out, here("results", "DEG_edgeR", "arbobios_phase_condition.tsv"))
+
+#write_tsv(edger.output,
+#          here("results", "DEG_edgeR", 
+#               "diff_express_all_comparisons.tsv"))
+
+edger.output %>% 
+  filter(logFC_chronVSnonChron.D0 > 1 & FDR_chronVSnonChron.D0 < 0.1) %>% nrow()
+edger.output %>% 
+  filter(logFC_chronVSnonChron.D0 < -1 & FDR_chronVSnonChron.D0 < 0.1) %>% nrow()
+
+edger.output %>% 
+  filter(logFC_chronVSnonChron.D21 > 1 & FDR_chronVSnonChron.D21 < 0.1) %>% nrow()
+edger.output %>% 
+  filter(logFC_chronVSnonChron.D21 < -1 & FDR_chronVSnonChron.D21 < 0.1) %>% nrow()
+
+edger.output %>% 
+  filter(logFC_chronD0VSchronD21 > 1 & FDR_chronD0VSchronD21 < 0.1) %>% nrow()
+edger.output %>% 
+  filter(logFC_chronD0VSchronD21 < -1 & FDR_chronD0VSchronD21 < 0.1) %>% nrow()
+
+edger.output %>% 
+  filter(logFC_nonChronD0VSnonChronD21 > 1 & 
+           FDR_nonChronD0VSnonChronD21 < 0.1) %>% nrow()
+edger.output %>% 
+  filter(logFC_nonChronD0VSnonChronD21 < -1 & 
+           FDR_nonChronD0VSnonChronD21 < 0.1) %>% nrow()
+
+edger.output %>% 
+  filter(logFC_chronVSnonChron > 1 & FDR_chronVSnonChron < 0.1) %>% nrow()
+edger.output %>% 
+  filter(logFC_chronVSnonChron < -1 & FDR_chronVSnonChron < 0.1) %>% nrow()
+
+edger.output %>% 
+  filter(logFC_D0VSD21 > 1 & FDR_D0VSD21 < 0.1) %>% nrow()
+edger.output %>% 
+  filter(logFC_D0VSD21 < -1 & FDR_D0VSD21 < 0.1) %>% nrow()
+```
+
+```{r Volcano Plot}
+##### Volcano plot function (NO label)
+volc_plot <- function(topTags.out, df = immgene) {
+  up <- topTags.out %>% filter(logFC > 1 & FDR < 0.1)
+  
+  down <- topTags.out %>% filter(logFC < -1 & FDR < 0.1)
+  
+  topTags.out %>% 
+    ggplot(aes(logFC, -log10(FDR))) +
+    geom_point(color = "grey", size = 0.8) +
+    geom_point(data = up ,
+               aes(logFC, -log10(FDR)), color = "#EF8A62", size = 0.8) +
+    geom_point(data = down,
+               aes(logFC, -log10(FDR)), color = "#67A9CF", size = 0.8) +
+    geom_vline(xintercept = c(-log2(2), log2(2)), linetype="dashed", 
+                  color = "red", size = 0.3) +
+    geom_hline(yintercept = -log10(0.1), linetype="dashed", color = "red", 
+               size = 0.3) +
+    theme_classic()
+}
+
+# chronVSctrl.D0
+chronVSnonChron.D0_vp <- volc_plot(chronVSnonChron.D0_t)
+
+# chronVSctrl.D21
+chronVSnonChron.D21_vp <- volc_plot(chronVSnonChron.D21_t)
+
+# chronD21VSchronD0
+chronD0VSchronD21_vp <- volc_plot(chronD0VSchronD21_t)
+
+# ctrlD21VSctrlD0
+nonChronD0VSnonChronD21_vp <- volc_plot(nonChronD0VSnonChronD21_t)
+
+# chronVSctrl
+chronVSnonChron_vp <- volc_plot(chronVSnonChron_t)
+
+# D21VSD0
+D0VSD21_vp <- volc_plot(D0VSD21_t)
+
+patchw <- (chronVSnonChron.D0_vp | chronVSnonChron.D21_vp | chronVSnonChron_vp)/
+  (chronD0VSchronD21_vp | nonChronD0VSnonChronD21_vp | D0VSD21_vp)
+
+fp <- patchw + plot_annotation(tag_levels = 'A')
+
+ggsave(here("results","figures","volcanoPlot_all_comparisons.png"), fp, 
+       device = "png", width = 9, height = 8, units = "cm", 
+       dpi = "print", scale = 2.5)
+
+###### Volcano plot function WITH label
+volc_plot_la <- function(topTags.out, df = immgene) {
+  up <- topTags.out %>% filter(logFC > 1 & FDR < 0.1)
+  
+  down <- topTags.out %>% filter(logFC < -1 & FDR < 0.1)
+  
+  topTags.out %>% 
+    ggplot(aes(logFC, -log10(FDR))) +
+    geom_point(color = "grey") +
+    geom_point(data = up ,
+               aes(logFC, -log10(FDR)), color = "#EF8A62", size = 2.5) +
+    geom_point(data = down,
+               aes(logFC, -log10(FDR)), color = "#67A9CF", size = 2.5) +
+    geom_vline(xintercept = c(-log2(2), log2(2)), linetype="dashed", 
+                  color = "red", size = 0.3) +
+    geom_hline(yintercept = -log10(0.1), linetype="dashed", color = "red", 
+               size = 0.3) +
+    geom_text_repel(data = up %>%
+                      bind_rows(down) %>% 
+                      filter(GeneSymbol %in% df$X1), 
+                    aes(label = GeneSymbol), min.segment.length = 0,
+                    max.overlaps = Inf, size = 3) +
+    theme_classic()
+}
+
+# chronVSctrl.D0
+chronVSnonChron.D0_vp_la <- volc_plot_la(chronVSnonChron.D0_t)
+
+ggsave(here("results","figures","volcanoPlot_chronVSnonChron.D0.png"),
+       chronVSnonChron.D0_vp_la , 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2.5)
+
+# chronVSctrl.D21
+chronVSnonChron.D21_vp_la <- volc_plot_la(chronVSnonChron.D21_t)
+
+ggsave(here("results","figures","volcanoPlot_chronVSnonChron.D21.png"),
+       chronVSnonChron.D21_vp_la, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2.5)
+
+# chronD21VSchronD0
+chronD0VSchronD21_vp_la <- volc_plot_la(chronD0VSchronD21_t)
+
+ggsave(here("results","figures","volcanoPlot_chronD0VSchronD21.png"),
+       chronD0VSchronD21_vp_la , 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2.5)
+
+# ctrlD21VSctrlD0
+nonChronD0VSnonChronD21_vp_la <- volc_plot_la(nonChronD0VSnonChronD21_t)
+
+ggsave(here("results","figures","volcanoPlot_nonChronD0VSnonChronD21.png"),
+       nonChronD0VSnonChronD21_vp_la, 
+       device = "png", width = 10, height = 6, units = "cm", 
+       dpi = "print", scale = 2.5)
+
+# chronVSctrl
+chronVSnonChron_vp_la <- volc_plot_la(chronVSnonChron_t)
+
+ggsave(here("results","figures","volcanoPlot_chronVSnonChron.png"),
+       chronVSnonChron_vp_la, 
+       device = "png", width = 8, height = 9, units = "cm", 
+       dpi = "print", scale = 1.3)
+
+# D21VSD0
+D0VSD21_vp_la <- volc_plot_la(D0VSD21_t)
+
+ggsave(here("results","figures","volcanoPlot_D0VSD21.png"),
+       D0VSD21_vp_la, 
+       device = "png", width = 8, height = 9, units = "cm", 
+       dpi = "print", scale = 1.3)
+```
+
+```{r Gene set enrichment analysis}
+## edgeR CAMERA
+#term.list <- split(gene_set, as.factor(gene_set$term))
+#path.list <- lapply(term.list, function(x) return(unname(as_vector(x[,2]))))
+#idx <- ids2indices(path.list, id = y$genes$GeneSymbol)
+
+idx <- ids2indices(gene_set, id = y$genes$GeneSymbol)
+
+chronVSctrl.D0.enrich <- camera(y, idx, design, 
+                                contrast = my.contrast[, "chronVSctrl.D0"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
+
+chronVSctrl.D21.enrich <- camera(y, idx, design, 
+                                 contrast = my.contrast[, "chronVSctrl.D21"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
+
+chronD21VSchronD0.enrich <- camera(y, idx, design,
+                                   contrast = my.contrast[, "chronD21VSchronD0"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
+
+ctrlD21VSctrlD0.enrich <- camera(y, idx, design, 
+                                  contrast = my.contrast[, "ctrlD21VSctrlD0"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
+
+chronVSctrl.enrich <- camera(y, idx, design, 
+                             contrast = my.contrast[, "chronVSctrl"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
+
+D21VSD0.enrich <- camera(y, idx, design,
+                             contrast = my.contrast[, "D21VSD0"]) %>% 
+  rownames_to_column("pathway") %>% 
+  mutate(stat = ifelse(Direction == "Up", -log10(FDR)*1, -log10(FDR)*-1))
+
+
+barcodeplot(D21VSD0_t$logFC,
+            index=idx[["G2/M Checkpoints"]],
+            labels=c("D21","D0"),
+            main="G2/M Checkpoints",
+            alpha=1)
+
+stat <- chronVSctrl.D0.enrich %>% 
+  slice_head(n = 10) %>% 
+  dplyr::select(pathway, stat) %>% 
+  full_join(chronVSctrl.D21.enrich %>%
+              slice_head(n = 10) %>% 
+               dplyr::select(pathway, stat), by = "pathway", 
+            suffix = c("_chronVSctrl.D0", "_chronVSctrl.D21")) %>% 
+  full_join(chronVSctrl.enrich %>%
+              slice_head(n = 10) %>%
+              dplyr::select(pathway, stat), by = "pathway") %>% 
+  full_join(chronD21VSchronD0.enrich %>% 
+              slice_head(n = 10) %>%
+               dplyr::select(pathway, stat), by = "pathway", 
+            suffix = c("_chronVSctrl", "_chronD21VSchronD0")) %>%
+  full_join(ctrlD21VSctrlD0.enrich %>% 
+              slice_head(n = 10) %>%
+               dplyr::select(pathway, stat), by = "pathway") %>%
+  full_join(D21VSD0.enrich %>% 
+              slice_head(n = 10) %>%
+               dplyr::select(pathway, stat), by = "pathway",
+            suffix = c("_ctrlD21VSctrlD0", "_D21VSD0")) %>% 
+  column_to_rownames("pathway") %>% 
+  rename_all(~ sub("stat_", "", .x)) %>% 
+  mutate_all(~ case_when(is.na(.) ~ 0, TRUE ~ .))
+```
+
+```{r FGSEA}
+# chronVSnonChron.D0
+ranks_chronVSnonChron.D0 <- chronVSnonChron.D0_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(logFC=mean(rank)) 
+%>% 
+  deframe()
+write_tsv(ranks_chronVSnonChron.D0,
+          here("results", "DEG_edgeR", "ranks_chronVSnonChron.D0.txt"))
+
+fgseaRes_chronVSnonChron.D0 <- fgsea(pathways=gene_set,
+                                       stats=ranks_chronVSnonChron.D0, eps=0)
+
+data.table::fwrite(fgseaRes_chronVSnonChron.D0, 
+                   here("results", "GSEA", "fgseaRes_chronVSnonChron.D0.tsv"), 
+                   sep="\t", sep2=c("", " ", ""))
+
+# chronVSnonChron.D21
+ranks_chronVSnonChron.D21 <- chronVSnonChron.D21_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_chronVSnonChron.D21 <- fgsea(pathways=gene_set, 
+                                       stats=ranks_chronVSnonChron.D21, eps=0)
+
+# chronVSnonChron
+ranks_chronVSnonChron <- chronVSnonChron_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_chronVSnonChron <- fgsea(pathways=gene_set, 
+                                       stats=ranks_chronVSnonChron, eps=0)
+
+# chronD0VSchronD21
+ranks_chronD0VSchronD21 <- chronD0VSchronD21_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_chronD0VSchronD21 <- fgsea(pathways=gene_set, 
+                                    stats=ranks_chronD0VSchronD21, eps=0)
+
+# nonChronD0VSnonChronD21
+ranks_nonChronD0VSnonChronD21 <- nonChronD0VSnonChronD21_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_nonChronD0VSnonChronD21 <- fgsea(pathways=gene_set, 
+                                    stats=ranks_nonChronD0VSnonChronD21, eps=0)
+
+# D0VSD21
+ranks_D0VSD21 <- D0VSD21_t %>% 
+  mutate(rank = -log10(PValue)/sign(logFC)) %>% 
+  dplyr::select(GeneSymbol, rank) %>% 
+  group_by(GeneSymbol) %>% 
+  summarize(rank=mean(rank)) %>% 
+  deframe()
+
+fgseaRes_D0VSD21 <- fgsea(pathways=gene_set, stats=ranks_D0VSD21, eps=0)
+
+# Join fgsea results
+fgseaRes <- bind_rows("chronVSnonChron.D0" = fgseaRes_chronVSnonChron.D0, 
+                      "chronVSnonChron.D21" = fgseaRes_chronVSnonChron.D21,
+                      "chronVSnonChron" = fgseaRes_chronVSnonChron,
+                      "chronD0VSchronD21" = fgseaRes_chronD0VSchronD21,
+                      "nonChronD0VSnonChronD21" = fgseaRes_nonChronD0VSnonChronD21,
+                      "D0VSD21" = fgseaRes_D0VSD21, .id = "compar") %>% 
+  left_join(root_node %>% 
+              dplyr::select(root_name, node_name), 
+            by = c("pathway" = "node_name")) %>% 
+  relocate(compar, pathway, root_name)
+
+custom_pal <- c("#053061", "#2166AC", "#4393C3", "#92C5DE",
+                        "#D1E5F0", "#FFFFFF", "#FDDBC7", "#F4A582",
+                        "#D6604D", "#B2182B", "#67001F")
+custom_pal <- colorRampPalette(custom_pal)(200)
+
+# By phase
+fgseaRes_phase <- fgseaRes %>% 
+  filter(compar %in% c("D0VSD21","chronD0VSchronD21","nonChronD0VSnonChronD21")) %>% 
+  group_by(pathway) %>% 
+  filter(any(padj < 0.0000001)) %>% 
+  mutate(NES = ifelse(padj > 0.0000001, 0, NES)) %>% 
+  na.omit()
+
+max_abs_nes <- max(abs(fgseaRes_phase$NES))
+
+fgseaRes_phase %>% 
+  ggplot(aes(compar, y=pathway, size=-log10(padj), fill=NES)) +
+  geom_point(color = 'white', shape=21) +
+  scale_fill_gradientn(colours=custom_pal, space = "Lab",
+                       limits=c(-max_abs_nes, max_abs_nes),
+                       ) +
+  facet_grid(rows = vars(root_name), scales = "free_y", space = "free_y",
+             switch = "y") +
+  guides(size = guide_legend(override.aes = list(fill = "black")))+
+  theme_bw() +
+  theme(panel.grid.major = element_line(linetype = "dashed"),
+        panel.spacing = unit(0, "lines"),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1),
+        strip.text.y.left = element_text(angle = 0),
+        strip.background =element_rect(fill=NA))
+
+# By Chronicity
+fgseaRes_chron <- fgseaRes %>% 
+  filter(compar %in% c("chronVSnonChron","chronVSnonChron.D0","chronVSnonChron.D21")) %>% 
+  group_by(pathway) %>% 
+  filter(any(padj < 0.00001)) %>% 
+  mutate(NES = ifelse(padj > 0.00001, 0, NES))
+
+ 
+  na.omit()
+
+max_abs_nes <- max(abs(fgseaRes_chron$NES))
+
+fgseaRes_chron %>% 
+  ggplot(aes(compar, y=pathway, size=-log10(padj), fill=NES)) +
+  geom_point(color = 'white', shape=21) +
+  scale_fill_gradientn(colours=custom_pal, space = "Lab",
+                       limits=c(-max_abs_nes, max_abs_nes),
+                       ) +
+  facet_grid(rows = vars(root_name), scales = "free_y", space = "free_y",
+             switch = "y") +
+  guides(size = guide_legend(override.aes = list(fill = "black")))+
+  theme_bw() +
+  theme(panel.grid.major = element_line(linetype = "dashed"),
+        panel.spacing = unit(0, "lines"),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1),
+        strip.text.y.left = element_text(angle = 0),
+        strip.background =element_rect(fill=NA)) 
+
+# Both
+fgseaRes_all <-  fgseaRes %>% 
+  group_by(pathway) %>% 
+  filter(any(padj < 1e-12)) %>% 
+  mutate(NES = ifelse(padj > 1e-12, 0, NES)) %>% 
+  na.omit() %>% 
+  mutate(compar = factor(compar, 
+                            level = c("chronVSnonChron", "chronVSnonChron.D0",
+                                       "chronVSnonChron.D21", "D0VSD21",
+                                       "chronD0VSchronD21", 
+                                       "nonChronD0VSnonChronD21")))
+
+max_abs_nes <- max(abs(fgseaRes_all$NES))
+
+arbo_phase_chron_gsea <- fgseaRes_all %>% 
+  ggplot(aes(compar, y=pathway, size=-log10(padj), fill=NES)) +
+  geom_point(color = 'white', shape=21) +
+  scale_fill_gradientn(colours=custom_pal, space = "Lab",
+                       limits=c(-max_abs_nes, max_abs_nes),
+                       ) +
+  facet_grid(rows = vars(root_name), scales = "free_y", space = "free_y",
+             switch = "y") +
+  guides(size = guide_legend(override.aes = list(fill = "black")))+
+  theme_bw() +
+  theme(panel.grid.major = element_line(linetype = "dashed"),
+        panel.spacing = unit(0, "lines"),
+        axis.text.x = element_text(angle = 35, vjust = 1, hjust=1),
+        strip.text.y.left = element_text(angle = 0),
+        strip.background =element_rect(fill=NA)) +
+  scale_x_discrete(name = NULL,
+                   labels= c("Chron VS non-Chron", "Chron VS non-Chron - Early",
+                             "Chron VS non-Chron - Late", "Early VS Late",
+                             "Chron.Early VS Chron.Late",
+                             "non-Chron.Early VS non-Chron.Late")) +
+  scale_y_discrete(name = NULL)
+
+#ggsave(here("results","figures","arbo_phase_chronicity_gsea.png"),
+#       arbo_phase_chron_gsea,
+#       device = "png", width = 8.9, height = 6.5, units = "cm", 
+#       dpi = "print", scale = 3)
+
+#x <- fgseaRes_all %>% filter(pathway == "Neutrophil degranulation")
+#z <- data.frame('arbobios_leadingEdge' = unique(unlist(x$leadingEdge)))
+#write_tsv(z, here('results', "GSEA", "arbobios_neutrophil_leadingEdge.tsv"))
+
+#ggplot(fgseaResTidy, aes(reorder(pathway, NES), NES)) +
+#  geom_col(aes(fill=padj<0.05)) +
+#  coord_flip() +
+#  labs(x="Pathway", y="Normalized Enrichment Score",
+#       title="Hallmark pathways NES from GSEA") + 
+#  theme_minimal()
+
+#plotEnrichment(pathways.hallmark[[head(fgseaRes[order(pval), ], 1)$pathway]],
+#               ranks) + labs(title=head(fgseaRes[order(pval), ], 1)$pathway)
+```
+
+```{r Neutrophil leadingEdge Heatmap}
+arb_lead <- read_tsv(here('results', "GSEA", "arbobios_neutrophil_leadingEdge.tsv"))
+csbl_lead <- read_tsv(here('results', "GSEA", "csbl_neutrophil_leadingEdge.tsv"))
+
+edgeR.out.arb <- read_tsv(here("results", "DEG_edgeR", 
+                               "arbobios_phase_condition.tsv"))
+
+edgeR.out.csbl <- read_tsv(here("results", "DEG_edgeR", 
+                               "csbl_phase_condition.tsv"))
+
+##################
+leadingEdge_genes <- arb_lead %>%
+  dplyr::rename(leadingEdge = arbobios_leadingEdge) %>% 
+  bind_rows(csbl_lead %>% dplyr::rename(leadingEdge = csbl_leadingEdge)) %>% 
+  unique()
+
+x <-  edgeR.out.arb %>% 
+  bind_rows(edgeR.out.csbl) %>% 
+  filter(GeneSymbol %in% leadingEdge_genes$leadingEdge)
+
+max_abs_FC <- max(abs(x$logFC))
+
+xm <- x %>% 
+  mutate(log10FDR = -log10(FDR)/sign(logFC)) %>% 
+  dplyr::select(compar, GeneSymbol, log10FDR) %>% 
+  pivot_wider(names_from = compar, values_from = log10FDR) %>% 
+  column_to_rownames("GeneSymbol") %>% 
+  na.omit()
+
+
+pheatmap(xm, scale = 'row', show_rownames = F)
+
+x %>% 
+ggplot(aes(compar, y=GeneSymbol, size=-log10(FDR), fill=logFC)) +
+  geom_point(color = 'white', shape=21) +
+  scale_fill_gradientn(colours=custom_pal, space = "Lab",
+                       limits=c(-max_abs_nes, max_abs_nes)) +
+  guides(size = guide_legend(override.aes = list(fill = "black")))+
+  theme_bw() +
+  theme(panel.grid.major = element_line(linetype = "dashed"),
+        axis.text.x = element_text(angle = 30, vjust = 1, hjust=1))
+```
+
+```{r DE analysis Multimapping}
+group <- factor(paste(pheno$Class, pheno$Day, sep = "_"))
+
+#Not multimapping
+y <- DGEList(counts = rawcount_multi[,-1], 
+             genes = hannot[,c(1,2,4)],
+             group = group)
+
+design <- model.matrix(~group+0)
+
+# Filtering low expression genes
+keep <- filterByExpr(y, min.count = 1)
+y <- y[keep, , keep.lib.sizes=FALSE]
+
+# Norm factors
+y <- calcNormFactors(y)
+#plotMDS(y, col = brewer.pal(4,"Set2")[group], labels = group)
+
+# Estimate Dispersion
+y <- estimateDisp(y, design)
+#plotBCV(y)
+
+#DE
+fit <- glmQLFit(y, design)
+
+chronVSctrl.D0 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSctrl.D0"])
+chronVSctrl.D21 <- glmQLFTest(fit, contrast = my.contrast[, "chronVSctrl.D21"])
+chronD21VSchronD0 <- glmQLFTest(fit, contrast = my.contrast[, "chronD21VSchronD0"])
+ctrlD21VSctrlD0 <- glmQLFTest(fit, contrast = my.contrast[, "ctrlD21VSctrlD0"])
+chronVSctrl <- glmQLFTest(fit, contrast = my.contrast[, "chronVSctrl"])
+D21VSD0 <- glmQLFTest(fit, contrast = my.contrast[, "D21VSD0"])
+
+chronVSctrl.D0_t <- topTags(chronVSctrl.D0, n = NULL)$table
+chronVSctrl.D21_t <- topTags(chronVSctrl.D21, n = NULL)$table
+chronD21VSchronD0_t <- topTags(chronD21VSchronD0, n = NULL)$table
+ctrlD21VSctrlD0_t <- topTags(ctrlD21VSctrlD0, n = NULL)$table
+chronVSctrl_t <- topTags(chronVSctrl, n = NULL)$table
+D21VSD0_t <- topTags(D21VSD0, n = NULL)$table
+
+edger.output.multi <- chronVSctrl.D0_t %>%
+  full_join(chronVSctrl.D21_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronVSctrl.D0", "_chronVSctrl.D21")) %>% 
+  full_join(chronD21VSchronD0_t, by = c("gene_id","GeneSymbol","Class")) %>% 
+  full_join(ctrlD21VSctrlD0_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronD21VSchronD0", "_ctrlD21VSctrlD0")) %>%
+  full_join(chronVSctrl_t, by = c("gene_id","GeneSymbol","Class")) %>%
+  full_join(D21VSD0_t, by = c("gene_id","GeneSymbol","Class"), 
+            suffix = c("_chronVSctrl", "_D21VSD0"))
+
+#write_tsv(edger.output.multi,
+#          here("results", "DEG_edgeR", 
+#               "diff_express_all_comparisons_multi.tsv"))
+
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl.D0 > 1 & FDR_chronVSctrl.D0 < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl.D0 < -1 & FDR_chronVSctrl.D0 < 0.1) %>% nrow()
+
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl.D21 > 1 & FDR_chronVSctrl.D21 < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl.D21 < -1 & FDR_chronVSctrl.D21 < 0.1) %>% nrow()
+
+edger.output.multi %>% 
+  filter(logFC_chronD21VSchronD0 > 1 & FDR_chronD21VSchronD0 < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_chronD21VSchronD0 < -1 & FDR_chronD21VSchronD0 < 0.1) %>% nrow()
+
+edger.output.multi %>% 
+  filter(logFC_ctrlD21VSctrlD0 > 1 & FDR_ctrlD21VSctrlD0 < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_ctrlD21VSctrlD0 < -1 & FDR_ctrlD21VSctrlD0 < 0.1) %>% nrow()
+
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl > 1 & FDR_chronVSctrl < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_chronVSctrl < -1 & FDR_chronVSctrl < 0.1) %>% nrow()
+
+edger.output.multi %>% 
+  filter(logFC_D21VSD0 > 1 & FDR_D21VSD0 < 0.1) %>% nrow()
+edger.output.multi %>% 
+  filter(logFC_D21VSD0 < -1 & FDR_D21VSD0 < 0.1) %>% nrow()
+```
+
+```{r Plot individual genes for inspection}
+x.tmm <- tmm %>% 
+  as.data.frame() %>% 
+  rownames_to_column("gene_id") %>% 
+  inner_join(hannot[,1:2], by = "gene_id") %>% 
+  relocate("gene_id", "GeneSymbol") %>% 
+  pivot_longer(-c('gene_id','GeneSymbol'), names_to = 'lib', 
+               values_to = 'tmm') %>%
+  mutate(lib = as.double(lib)) %>% 
+  full_join(pheno, by = c('lib' = 'Sample')) %>% 
+  unite("ClassDay", Class:Day)
+
+rnf39 <- x.tmm %>% 
+  filter(GeneSymbol == "RNF39") %>% 
+  ggplot(aes(ClassDay, log2(tmm+1))) +
+  geom_boxplot(aes(fill = ClassDay)) +
+  scale_fill_discrete() +
+  theme_classic() + 
+  theme( legend.position = "none")
+
+ggsave(here("results","figures","RNF39.png"),
+       rnf39, 
+       device = "png", width = 9, height = 6, units = "cm", 
+       dpi = "print", scale = 1.3)
+
+ccl2 <- x.tmm %>% 
+  filter(GeneSymbol == "CCL2") %>% 
+  ggplot(aes(ClassDay, log2(tmm+1))) +
+  geom_boxplot(aes(fill = ClassDay)) +
+  scale_fill_discrete() +
+  theme_classic() + 
+  theme( legend.position = "none")
+  
+ggsave(here("results","figures","CCL2.png"), ccl2, 
+       device = "png", width = 9, height = 6, units = "cm", 
+       dpi = "print", scale = 1.3)
+```
+

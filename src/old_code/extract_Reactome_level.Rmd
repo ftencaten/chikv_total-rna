@@ -1,0 +1,95 @@
+---
+title: "Extract node information from Reactome pathways"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r Load libraries}
+library(here)
+library(tidyverse)
+library(igraph)
+library(ActivePathways)
+```
+
+```{r Load files}
+# All levels of the pathway hierarchy (all organisms)
+# https://reactome.org/download/current/Ensembl2Reactome_All_Levels.txt
+reactome_all <- read_tsv(here("data", "reactome_data", 
+                              "Ensembl2Reactome_All_Levels.txt"), col_names = F)
+
+# Pathways hierarchy Relation
+# https://reactome.org/download/current/ReactomePathwaysRelation.txt
+hch <- read_tsv(here("data", "reactome_data", "ReactomePathwaysRelation.txt"),
+                col_names = F)
+
+# Reactome pathways gmt
+# https://reactome.org/download/current/ReactomePathways.gmt.zip
+react.gmt <- read.GMT(here("data", "reactome_data", 
+                           "ReactomePathways_20210317.gmt"))
+```
+
+```{r Extract nodes according the level and identify the root node}
+hrel <- hch %>% 
+  filter(grepl("HSA", X1))%>% 
+  dplyr::rename(source = "X1", target = "X2")
+
+# Calculate hierarchy level with graph.data.frame function from igraph pkg
+graph_hrel <- graph.data.frame(hrel)
+
+# Extract leaves
+leaves <- which(degree(graph_hrel, v = V(graph_hrel), 
+                       mode = "out") == 0, useNames = T)
+# Extract roots
+root <- which(degree(graph_hrel, v = V(graph_hrel), 
+                     mode = "in") == 0, useNames = T)
+
+# Identify all nodes related to each root 
+leaves.list <- list()
+for (i in 1:length(root)) {
+  node <- all_simple_paths(graph_hrel, from = root[i], to = leaves)
+  for (j in 1:length(node)) {
+    leaves.list[[rev(as_ids(node[[j]]))[1]]] <- as_ids(node[[j]])
+  }
+
+}
+
+reactome_df <- plyr::ldply(leaves.list, rbind)
+#write_tsv(reactome_df, 'data/reactome_levels.tsv')
+
+# Extract third level nodes
+third_level <- reactome_df %>% 
+  dplyr::select("3") %>% 
+  na.omit() %>% 
+  unique() %>%
+  deframe
+
+# Filter selected nodes at GMT Object
+third_level_gmt <- Filter(function(term) term$name %in% third_level, react.gmt)
+
+# Write GMT object with filtered nodes
+#write.GMT(third_level_gmt, here("data", "reactome_data",
+#                                "ReactomePathwaysLevel3_2021-03.gmt"))
+
+###### Identify the root node for each node of interest
+df <- NULL
+for(k in third_level){
+  root_node <- leaves.list[grep(k, leaves.list)][[1]][1]
+  df <- rbind(df, data.frame(root = root_node, node = k))
+}
+
+out.df <- df %>%
+  left_join(reactome_all %>% 
+              select(X2, X4) %>% 
+              unique(), by =c('root' = 'X2')) %>% 
+  rename('root_name' = X4) %>% 
+  left_join(reactome_all %>% 
+              select(X2, X4) %>% 
+              unique(), by =c('node' = 'X2')) %>% 
+  rename('node_name' = X4) %>% 
+  relocate(root, root_name, node, node_name)
+
+# Write files with root/node association
+#write_tsv(out.df, here("data", "reactome_data", 
+#                       "ReactomePathways_leaves_root_third_level.tsv"))
+```
+
